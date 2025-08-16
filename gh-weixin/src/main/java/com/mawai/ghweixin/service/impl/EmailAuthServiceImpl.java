@@ -3,16 +3,16 @@ package com.mawai.ghweixin.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
+import com.mawai.ghmbplus.dao.UserCategoryMapper;
 import com.mawai.ghmbplus.dao.UserMapper;
 import com.mawai.ghmbplus.model.User;
-import com.mawai.ghweixin.vo.LoginResultVO;
+import com.mawai.ghmbplus.model.UserCategory;
 import com.mawai.ghweixin.dto.UserInfoDTO;
 import com.mawai.ghweixin.service.EmailAuthService;
 import com.mawai.ghweixin.strategy.EmailStrategy;
 import com.mawai.ghweixin.utils.PasswordEncoder;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,19 +27,14 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class EmailAuthServiceImpl implements EmailAuthService {
 
-    @Autowired
-    private CacheService cacheService;
-    
-    @Autowired
-    private UserMapper userMapper;
-    
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private EmailStrategy emailStrategy;
+    private final CacheService cacheService;
+    private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final EmailStrategy emailStrategy;
+    private final UserCategoryMapper userCategoryMapper;
 
     /**
      * 验证码在Redis中的前缀
@@ -185,6 +180,9 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             user.setStatus((byte) 1);  // 正常状态
             user.setUpdatedAt(LocalDateTime.now());
             userMapper.updateById(user);
+
+            // 创建默认分类
+            userCategoryMapper.insert(new UserCategory().setUserId(userId).setCategoryName("默认"));
             
             // 设置邮箱认证状态
             StpUtil.getSession().set("emailAuth", "full");

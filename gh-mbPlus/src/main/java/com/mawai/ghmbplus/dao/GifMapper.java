@@ -2,9 +2,8 @@ package com.mawai.ghmbplus.dao;
 
 import com.mawai.ghmbplus.model.Gif;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-
-
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * <p>
@@ -17,4 +16,24 @@ import org.apache.ibatis.annotations.Mapper;
 @Mapper
 public interface GifMapper extends BaseMapper<Gif> {
 
+    /**
+     * 基于随机数列查询随机GIF
+     * @param randomValue 随机数值 (0.0 - 1.0)
+     * @return 随机GIF记录
+     */
+    Gif selectRandom(@Param("randomValue") double randomValue);
+
+    /**
+     * 查询最小的随机数的那一行
+     * @return 最小的随机数的那一行
+     */
+    Gif selectMinRandom();
+
+
+    /**
+     * 插入一条数据，并设置随机数
+     * @param gif GIF记录
+     * @return 插入的行数
+     */
+    int insertOneWithRandomValue(Gif gif);
 }

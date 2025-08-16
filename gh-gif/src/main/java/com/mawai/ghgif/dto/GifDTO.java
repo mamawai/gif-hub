@@ -1,14 +1,27 @@
 package com.mawai.ghgif.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.web.multipart.MultipartFile;
 
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Schema(description = "Gif上传请求")
 public class GifDTO {
-    private Long id; // 主键ID
-    private String fileUrl; // 文件URL
-    private String title; // 标题
-    private String description; // 描述
-    private Long likeCount; // 点赞次数
-    private Long downloadCount; // 下载次数
-    private String userId; // 上传用户ID
+
+    @Schema(description = "gif文件", requiredMode = Schema.RequiredMode.REQUIRED)
+    private MultipartFile file;
+
+    // 不传userId，使用satoken获取
+    @Schema(description = "用户ID", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private Long userId;
+
+    @Schema(description = "gif标题", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private String title;
+
+    @Schema(description = "gif描述", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private String description;
 }

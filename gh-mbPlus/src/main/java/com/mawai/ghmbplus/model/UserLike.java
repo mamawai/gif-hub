@@ -55,6 +55,13 @@ public class UserLike implements Serializable {
     private Long gifId;
 
     /**
+     * 分类ID
+     */
+    @TableField("user_like_category_id")
+    @Schema(description = "分类ID")
+    private Long userLikeCategoryId;
+
+    /**
      * 创建时间
      */
     @TableField("created_at")

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,14 @@ import java.util.concurrent.TimeUnit;
 public class CacheService {
 
     private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+
+    // 避免每次调用都创建新实例
+    private final ObjectMapper objectMapper = createObjectMapper();
+
+    private static ObjectMapper createObjectMapper() {
+        return new ObjectMapper();
+    }
 
     /**
      * 复制key
@@ -69,6 +78,53 @@ public class CacheService {
      */
     public <T> T get(String key) {
         return (T) redisTemplate.opsForValue().get(key);
+    }
+
+    /**
+     * 获取数字类型的值
+     * @param key 键
+     * @return 值
+     */
+    public <T> T getNumber(String key) {
+        Object value = redisTemplate.opsForValue().get(key);
+        if (value instanceof Number) {
+            return (T) value;
+        }
+        log.error("{} 的值不是数字类型", key);
+        return null;
+    }
+
+    /**
+     * 批量获取数字类型的值
+     * @param keys 键列表
+     * @return 按keys顺序返回的数字值列表（不存在或非数字的位置为0）
+     */
+    public List<Long> batchGetNumbers(List<String> keys) {
+        List<Long> result = new ArrayList<>(keys.size());
+        
+        if (keys.isEmpty()) {
+            return result;
+        }
+        
+        try {
+            // 使用Redis的批量获取操作，返回结果与keys顺序一致
+            List<Object> values = redisTemplate.opsForValue().multiGet(keys);
+            
+            if (values != null) {
+                for (int i = 0; i < keys.size(); i++) {
+                    Object value = values.get(i);
+                    if (value instanceof Number) {
+                        result.add(((Number) value).longValue());
+                    } else {
+                        result.add(0L);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("批量获取数字值失败: {}", e.getMessage(), e);
+        }
+        
+        return result;
     }
 
     /**
@@ -228,37 +284,53 @@ public class CacheService {
         Object[] args = new Object[] {delta, unit.toSeconds(timeout)};
         redisTemplate.execute(script, List.of(key), args);
     }
-    
-    /**
-     * 递增并处理set中的元素：
-     * 如果在dislike字段中存在，则从dislike中移除；
-     * 如果dislike中不存在，则添加到like字段
-     *
-     * @param countKey  计数键
-     * @param memberKey set键
-     * @param fileId    要添加到集合的值
-     * @param timeout   过期时间
-     * @param unit      时间单位
-     */
-    public void incrementAndAddToSet(String countKey, String memberKey, String fileId, long timeout, TimeUnit unit) {
-        // 使用Lua脚本确保原子性操作
-        String scriptText = "local value = redis.call('INCR', KEYS[1]); " +
-                        "redis.call('EXPIRE', KEYS[1], ARGV[3]); " +
 
-                        // 检查用户是否已将此GIF标记为不喜欢
-                        "if redis.call('SISMEMBER', KEYS[2] .. ':dislike', ARGV[2]) == 1 then " +
-                        "    redis.call('SREM', KEYS[2] .. ':dislike', ARGV[2]); " +
-                        "    redis.call('EXPIRE', KEYS[2] .. ':dislike', ARGV[3]); " +
-                        "else " +
-                        "    redis.call('SADD', KEYS[2] .. ':like', ARGV[2]); " +
-                        "    redis.call('EXPIRE', KEYS[2] .. ':like', ARGV[3]); " +
-                        "end " +
-                        "return value;";
-        RedisScript<Long> script = RedisScript.of(scriptText, Long.class);
-        
-        // 使用Object数组传递参数
-        Object[] args = new Object[] {"like", fileId, unit.toSeconds(timeout)};
-        redisTemplate.execute(script, List.of(countKey, memberKey), args);
+    /**
+     * 获取用户的所有点赞分类ID映射
+     * @param categoryKey 分类hash键（如：user:like:category:userId）
+     * @param clearAfterGet 获取后是否清空
+     * @return GIF ID -> 分类ID 的映射
+     */
+    private Map<String, Long> getLikeCategoryIds(String categoryKey, boolean clearAfterGet) {
+        try {
+            Map<Object, Object> rawMap = redisTemplate.opsForHash().entries(categoryKey);
+            if (clearAfterGet) redisTemplate.delete(categoryKey);
+            
+            // 转换类型
+            Map<String, Long> result = new HashMap<>();
+            for (Map.Entry<Object, Object> entry : rawMap.entrySet()) {
+                String gifId = entry.getKey().toString();
+                Long categoryId = Long.parseLong(entry.getValue().toString());
+                result.put(gifId, categoryId);
+            }
+            
+            log.info("获取点赞分类ID映射: key={}, size={}", categoryKey, result.size());
+            return result;
+        } catch (Exception e) {
+            log.error("获取点赞分类ID映射失败: categoryKey={}, 错误: {}", categoryKey, e.getMessage(), e);
+            return new HashMap<>();
+        }
+    }
+
+    /**
+     * 安全获取用户的所有点赞分类ID映射，支持oldKey备份机制
+     * @param categoryKey 分类hash键（如：user:like:category:userId）
+     * @param clearAfterGet 获取后是否清空
+     * @return GIF ID -> 分类ID 的映射
+     */
+    public Map<String, Long> getLikeCategoryIdsSafely(String categoryKey, boolean clearAfterGet) {
+        try {
+            // 先创建备份，再获取并清空（确保数据安全）
+            if (clearAfterGet && hasKey(categoryKey)) {
+                String oldCategoryKey = categoryKey + ":old";
+                copy(categoryKey, oldCategoryKey);
+            }
+            
+            return getLikeCategoryIds(categoryKey, clearAfterGet);
+        } catch (Exception e) {
+            log.error("安全获取点赞分类ID映射失败: categoryKey={}, 错误: {}", categoryKey, e.getMessage(), e);
+            return new HashMap<>();
+        }
     }
     
     /**
@@ -300,62 +372,59 @@ public class CacheService {
     }   
     
     /**
-     * 递减并处理set中的元素：
-     * 如果在like字段中存在，则从like中移除；
-     * 如果like中不存在，则添加到dislike字段
-     *
-     * @param countKey  计数键
-     * @param memberKey set键
-     * @param fileId    要设置的元素
-     * @param timeout   过期时间
-     * @param unit      时间单位
-     */
-    public void decrementAndRemoveFromSet(String countKey, String memberKey, String fileId, long timeout, TimeUnit unit) {
-        // 使用Lua脚本确保原子性操作
-        String scriptText = "local value = redis.call('DECR', KEYS[1]); " +
-                        "redis.call('EXPIRE', KEYS[1], ARGV[3]); " +
-                        "if redis.call('SISMEMBER', KEYS[2] .. ':like', ARGV[2]) == 1 then " +
-                        "    redis.call('SREM', KEYS[2] .. ':like', ARGV[2]); " +
-                        "    redis.call('EXPIRE', KEYS[2] .. ':like', ARGV[3]); " +
-                        "else " +
-                        "    redis.call('SADD', KEYS[2] .. ':dislike', ARGV[2]); " +
-                        "    redis.call('EXPIRE', KEYS[2] .. ':dislike', ARGV[3]); " +
-                        "end " +
-                        "return value;";
-        RedisScript<Long> script = RedisScript.of(scriptText, Long.class);  
-        
-        // 使用Object数组传递参数
-        Object[] args = new Object[] {"dislike", fileId, unit.toSeconds(timeout)};
-        redisTemplate.execute(script, List.of(countKey, memberKey), args);
-    }
-    
-    /**
-     * 获取计数器值，不存在则初始化为0
-     * @param key 键
-     * @return 计数器值
-     */
-    public Long getCounter(String key) {
-        if (!hasKey(key)) {
-            set(key, 0L);
-            return 0L;
-        }
-        return get(key);
-    }
-    
-    /**
-     * 获取计数器值并设置过期时间，不存在则初始化为0
-     * @param key 键
+     * 新的点赞操作（使用Hash+Set混合结构）
+     * @param countKey 计数键 gif:like:fileId
+     * @param likeHashKey 点赞Hash键 user:like:category:userId  
+     * @param dislikeSetKey 不喜欢Set键 user:dislike:userId
+     * @param fileId 文件ID
+     * @param categoryId 分类ID
      * @param timeout 过期时间
      * @param unit 时间单位
-     * @return 计数器值
      */
-    public Long getCounterWithExpire(String key, long timeout, TimeUnit unit) {
-        if (!hasKey(key)) {
-            set(key, 0L, timeout, unit);
-            return 0L;
-        }
-        expire(key, timeout, unit);
-        return get(key);
+    public void likeOperationOptimized(String countKey, String likeHashKey, String dislikeSetKey, String fileId, Long categoryId, long timeout, TimeUnit unit) {
+        String script = 
+            "if redis.call('SISMEMBER', KEYS[3], ARGV[1]) == 1 then " +
+            "    redis.call('SREM', KEYS[3], ARGV[1]) " +
+            "end " +
+            "redis.call('HSET', KEYS[2], ARGV[1], ARGV[2]) " +
+            "redis.call('INCR', KEYS[1]) " +
+            "redis.call('EXPIRE', KEYS[1], ARGV[3]) " +
+            "redis.call('EXPIRE', KEYS[2], ARGV[3]) " +
+            "redis.call('EXPIRE', KEYS[3], ARGV[3])";
+            
+        stringRedisTemplate.execute(
+            RedisScript.of(script, Void.class),
+            List.of(countKey, likeHashKey, dislikeSetKey),
+            fileId, categoryId.toString(), String.valueOf(unit.toSeconds(timeout))
+        );
+    }
+
+    /**
+     * 新的取消点赞操作（使用Hash+Set混合结构）
+     * @param countKey 计数键 gif:like:fileId
+     * @param likeHashKey 点赞Hash键 user:like:category:userId
+     * @param dislikeSetKey 不喜欢Set键 user:dislike:userId  
+     * @param fileId 文件ID
+     * @param timeout 过期时间
+     * @param unit 时间单位
+     */
+    public void dislikeOperationOptimized(String countKey, String likeHashKey, String dislikeSetKey, String fileId, long timeout, TimeUnit unit) {
+        String script = 
+            "if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 1 then " +
+            "    redis.call('HDEL', KEYS[2], ARGV[1]) " +
+            "else " +
+            "    redis.call('SADD', KEYS[3], ARGV[1]) " +
+            "    redis.call('EXPIRE', KEYS[3], ARGV[2]) " +
+            "end " +
+            "redis.call('DECR', KEYS[1]) " +
+            "redis.call('EXPIRE', KEYS[1], ARGV[2]) " +
+            "redis.call('EXPIRE', KEYS[2], ARGV[2])";
+            
+        stringRedisTemplate.execute(
+            RedisScript.of(script, Void.class),
+            List.of(countKey, likeHashKey, dislikeSetKey),
+            fileId, String.valueOf(unit.toSeconds(timeout))
+        );
     }
 
     /**
@@ -368,18 +437,37 @@ public class CacheService {
     }
 
     /**
-     * 获取set集合中的所有元素并转换为String类型
+     * 获取set集合中的所有元素（String类型）
      * @param key 键
      * @return String类型的元素集合
      */
     public Set<String> getStringSet(String key) {
-        Set<Object> objectSet = redisTemplate.opsForSet().members(key);
-        if (objectSet == null) {
+        Set<String> stringSet = stringRedisTemplate.opsForSet().members(key);
+        return stringSet != null ? stringSet : Set.of();
+    }
+
+    /**
+     * 安全获取set集合，支持oldKey备份机制
+     * @param key 键
+     * @param clearAfterGet 获取后是否清空
+     * @return String类型的元素集合
+     */
+    public Set<String> getStringSetSafely(String key, boolean clearAfterGet) {
+        try {
+            // 先创建备份，再获取并清空（确保数据安全）
+            if (clearAfterGet && hasKey(key)) {
+                String oldKey = key + ":old";
+                copy(key, oldKey);
+            }
+            
+            Set<String> result = getStringSet(key);
+            if (clearAfterGet) delete(key);
+            
+            return result;
+        } catch (Exception e) {
+            log.error("安全获取Set失败: key={}, clear={}, 错误: {}", key, clearAfterGet, e.getMessage(), e);
             return Set.of();
         }
-        return objectSet.stream()
-                .map(Object::toString)
-                .collect(java.util.stream.Collectors.toSet());
     }
     
     /**
@@ -390,45 +478,33 @@ public class CacheService {
     public Set<String> getKeysWithPattern(String pattern) {
         return redisTemplate.keys(pattern);
     }
-    
-    /**
-     * 获取值并重置为0（原子操作）
-     * @param key 键
-     * @return 获取到的值，如果不存在则返回null
-     */
-    public Long getAndReset(String key) {
-        // 原子操作，获取值并设置为0
-        String script = "local value = redis.call('GET', KEYS[1]); " +
-                "redis.call('SET', KEYS[1], 0); " +
-                "return value;";
-        Object result = redisTemplate.execute(RedisScript.of(script, String.class), List.of(key));
-        return Long.valueOf(result.toString());
-    }
 
     /**
-     * 获取所有有like或dislike数据的用户ID
-     * @param userLikeKeyPrefix 用户喜欢键前缀，如"user:like:"
+     * 获取所有有like或dislike数据的用户ID（新数据结构）
+     * @param likeCategoryKeyPrefix 用户喜欢分类键前缀，如"user:like:category:"
+     * @param dislikeKeyPrefix 用户不喜欢键前缀，如"user:dislike:"
      * @return 用户ID集合
      */
-    public Set<String> getUserIdsWithLikeData(String userLikeKeyPrefix) {
-        Set<String> likeKeys = getKeysWithPattern(userLikeKeyPrefix + "*:like");
-        Set<String> dislikeKeys = getKeysWithPattern(userLikeKeyPrefix + "*:dislike");
+    public Set<String> getUserIdsWithLikeDataOptimized(String likeCategoryKeyPrefix, String dislikeKeyPrefix) {
+        Set<String> likeKeys = getKeysWithPattern(likeCategoryKeyPrefix + "*");
+        Set<String> dislikeKeys = getKeysWithPattern(dislikeKeyPrefix + "*");
 
         Set<String> userIds = new HashSet<>();
-        int prefixLength = userLikeKeyPrefix.length();
+        int likePrefixLength = likeCategoryKeyPrefix.length();
+        int dislikePrefixLength = dislikeKeyPrefix.length();
 
-        // 从like keys中提取用户ID
+        // 从like category keys中提取用户ID
         for (String key : likeKeys) {
-            if (key.length() > prefixLength + 5) { // 5 = ":like".length()
-                String userId = key.substring(prefixLength, key.length() - 5);
+            if (key.length() > likePrefixLength) {
+                String userId = key.substring(likePrefixLength);
                 userIds.add(userId);
             }
         }
 
         // 从dislike keys中提取用户ID
         for (String key : dislikeKeys) {
-            if (key.length() > prefixLength + 8) { // 8 = ":dislike".length()
-                String userId = key.substring(prefixLength, key.length() - 8);
+            if (key.length() > dislikePrefixLength) {
+                String userId = key.substring(dislikePrefixLength);
                 userIds.add(userId);
             }
         }
@@ -437,55 +513,45 @@ public class CacheService {
     }
 
     /**
-     * 原子获取set中like和dislike字段的值
-     * @param key set键
-     * @param clear 是否清空set
-     * @return 包含like和dislike字段值的Map
+     * 一次Redis请求完成：扫描匹配模式的key + 过滤非零值 + 获取值 + 重置为0
+     * @param pattern 键的模式，如"gif:like:*"
+     * @return 包含重置前非零值的键值对Map
      */
-    public Map<String, Set<String>> getSetLikeDislike(String key, boolean clear) {
-        String scriptText = "local result = {}; " +
-                    "result['like'] = redis.call('SMEMBERS', KEYS[1] .. ':like'); " +
-                    "result['dislike'] = redis.call('SMEMBERS', KEYS[1] .. ':dislike'); " +
-                    // 如果clear为true，则清空集合
-                    "if tonumber(ARGV[1]) == 1 then " +
-                    "    redis.call('DEL', KEYS[1] .. ':like', KEYS[1] .. ':dislike'); " +
-                    "end " +
-                    "return cjson.encode(result);";
+    public Map<String, Long> scanAndResetNonZeroCounters(String pattern) {
+        // 使用SCAN + 过滤 + 获取 + 重置的Lua脚本
+        String scriptText = 
+            "local result = {}; " +
+            "local cursor = '0'; " +
+            "repeat " +
+            "    local scanResult = redis.call('SCAN', cursor, 'MATCH', ARGV[1]); " +
+            "    cursor = scanResult[1]; " +
+            "    local keys = scanResult[2]; " +
+            "    for i = 1, #keys do " +
+            "        local value = redis.call('GET', keys[i]); " +
+            "        if value and tonumber(value) ~= 0 then " +
+            "            result[keys[i]] = tonumber(value); " +
+            "            redis.call('SET', keys[i], 0); " +
+            "        end " +
+            "    end " +
+            "until cursor == '0'; " +
+            "return cjson.encode(result);";
+        
         RedisScript<String> script = RedisScript.of(scriptText, String.class);
         
-        // 使用Object数组传递参数
-        Object[] args = new Object[] {clear ? "1" : "0"};
-        String result = redisTemplate.execute(script, List.of(key), args);
-        
-        Map<String, Set<String>> resultMap = new HashMap<>();
-        // 默认初始化空集合
-        resultMap.put("like", new HashSet<>());
-        resultMap.put("dislike", new HashSet<>());
-        
-        if (result != null) {
-            try {
-                // 使用Jackson解析JSON字符串
-                Map<String, Object> parsedResult = new ObjectMapper().readValue(result, new TypeReference<Map<String, Object>>() {});
-                
-                // 处理like字段
-                if (parsedResult.get("like") != null && parsedResult.get("like") instanceof List) {
-                    @SuppressWarnings("unchecked")
-                    List<String> likeList = (List<String>) parsedResult.get("like");
-                    resultMap.put("like", new HashSet<>(likeList));
-                }
-                
-                // 处理dislike字段
-                if (parsedResult.get("dislike") != null && parsedResult.get("dislike") instanceof List) {
-                    @SuppressWarnings("unchecked")
-                    List<String> dislikeList = (List<String>) parsedResult.get("dislike");
-                    resultMap.put("dislike", new HashSet<>(dislikeList));
-                }
-                // 返回set也好 contains效率高
-            } catch (Exception e) {
-                log.error("解析Redis返回的JSON失败: {}", e.getMessage());
+        try {
+            // 使用StringRedisTemplate执行脚本，传入pattern参数
+            String result = stringRedisTemplate.execute(script, List.of(), pattern);
+            
+            if (result.trim().isEmpty()) {
+                return new HashMap<>();
             }
+            
+            // 解析JSON结果
+            return objectMapper.readValue(result, new TypeReference<>() {
+            });
+        } catch (Exception e) {
+            log.error("扫描并重置非零计数器失败: pattern={}, 错误: {}", pattern, e.getMessage(), e);
+            return new HashMap<>();
         }
-        
-        return resultMap;
     }
 }

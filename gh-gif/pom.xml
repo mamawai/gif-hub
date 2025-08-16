@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <java.version>17</java.version>
+        <java.version>21</java.version>
     </properties>
     <dependencies>
         <dependency>
@@ -27,7 +27,15 @@
             <groupId>com.mawai</groupId>
             <artifactId>gh-mbPlus</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
 
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
@@ -36,27 +44,6 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct-processor</artifactId>
         </dependency>
-
-<!--        <dependency>-->
-<!--            <groupId>com.aliyun.oss</groupId>-->
-<!--            <artifactId>aliyun-sdk-oss</artifactId>-->
-<!--        </dependency>-->
-        <!-- 添加GIF压缩所需的依赖 -->
-<!--        <dependency>-->
-<!--            <groupId>com.madgag</groupId>-->
-<!--            <artifactId>animated-gif-lib</artifactId>-->
-<!--            <version>1.4</version>-->
-<!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>net.coobird</groupId>-->
-<!--            <artifactId>thumbnailator</artifactId>-->
-<!--            <version>0.4.19</version>-->
-<!--        </dependency>-->
-<!--        <dependency>-->
-<!--            <groupId>org.bytedeco</groupId>-->
-<!--            <artifactId>javacv-platform</artifactId>-->
-<!--            <version>1.5.8</version>-->
-<!--        </dependency>-->
 
         <!-- AWS SDK for S3 (兼容Cloudflare R2) -->
         <dependency>
@@ -82,19 +69,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
-            <!-- 配置插件来支持 MapStruct 注解处理 -->
-<!--            很抽风了这次不配置也可以-->
+            <!-- 配置插件来支持 MapStruct 注解处理 https://blog.csdn.net/weixin_45697659/article/details/131001384-->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.10.1</version>
+                <version>${maven-compiler-plugin.version}</version>
                 <configuration>
                     <!-- 配置 Java 版本 -->
-                    <source>21</source>
-                    <target>21</target>
-                    <compilerArgs>
-                        <arg>-Amapstruct.defaultComponentModel=spring</arg> <!-- 如果你使用 Spring -->
-                    </compilerArgs>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>

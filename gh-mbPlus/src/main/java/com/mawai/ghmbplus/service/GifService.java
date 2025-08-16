@@ -2,9 +2,6 @@ package com.mawai.ghmbplus.service;
 
 import com.mawai.ghmbplus.model.Gif;
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.mawai.ghmbplus.model.GifDelete;
-
-import java.util.List;
 
 /**
  * <p>
@@ -16,4 +13,7 @@ import java.util.List;
  */
 public interface GifService extends IService<Gif> {
 
+   Gif getRandomOne();
+
+   Boolean insertOne(Gif gif);
 }

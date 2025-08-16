@@ -40,13 +40,3 @@ cloudflare:
         # 替换为API秘密密钥
         secret-key:
 
-# GIF压缩配置
-gif:
-  compress:
-    quality: 0.7  # 压缩质量 (0.1-1.0)
-    max-width: 800  # 最大宽度
-    max-height: 600  # 最大高度
-  thumbnail:
-    width: 200  # 缩略图宽度
-    height: 200  # 缩略图高度
-  max-size: 10485760

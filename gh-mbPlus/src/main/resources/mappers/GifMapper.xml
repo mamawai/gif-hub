@@ -2,4 +2,53 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.mawai.ghmbplus.dao.GifMapper">
 
+    <select id="selectRandom" resultType="com.mawai.ghmbplus.model.Gif">
+        select *
+        from gif
+        where status = 1
+          and random_number >= #{randomValue}
+        order by random_number
+        limit 1
+    </select>
+
+    <select id="selectMinRandom" resultType="com.mawai.ghmbplus.model.Gif">
+        select *
+        from gif
+        where status = 1
+          and random_number = (select MIN(random_number) from gif)
+        limit 1
+    </select>
+
+    <insert id="insertOneWithRandomValue" parameterType="com.mawai.ghmbplus.model.Gif" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO gif (
+            user_id,
+            random_number,
+            title,
+            description,
+            file_url,
+            file_size,
+            width,
+            height,
+            duration,
+            status,
+            view_count,
+            like_count,
+            download_count
+        ) VALUES (
+            #{userId},
+            RAND(),
+            #{title},
+            #{description},
+            #{fileUrl},
+            #{fileSize},
+            #{width},
+            #{height},
+            #{duration},
+            #{status},
+            #{viewCount},
+            #{likeCount},
+            #{downloadCount}
+        )
+    </insert>
+
 </mapper>

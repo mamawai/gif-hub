@@ -14,13 +14,13 @@ import lombok.NoArgsConstructor;
 @Schema(description = "邮箱注册请求")
 public class EmailRegisterDTO {
     
-    @Schema(description = "邮箱地址", required = true)
+    @Schema(description = "邮箱地址", requiredMode = Schema.RequiredMode.REQUIRED)
     private String email;
     
-    @Schema(description = "密码", required = true)
+    @Schema(description = "密码", requiredMode = Schema.RequiredMode.REQUIRED)
     private String password;
     
-    @Schema(description = "验证码", required = true)
+    @Schema(description = "验证码", requiredMode = Schema.RequiredMode.REQUIRED)
     private String verificationCode;
     
     @Schema(description = "用户昵称")

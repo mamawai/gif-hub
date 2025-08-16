@@ -3,6 +3,7 @@ package com.mawai.ghweixin.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 /**
@@ -14,7 +15,7 @@ import lombok.NoArgsConstructor;
 @Schema(description = "邮箱登录请求")
 public class EmailLoginDTO {
     
-    @Schema(description = "邮箱地址", required = true)
+    @Schema(description = "邮箱地址", requiredMode = Schema.RequiredMode.REQUIRED)
     private String email;
     
     @Schema(description = "密码（密码登录时需要）")
@@ -23,6 +24,6 @@ public class EmailLoginDTO {
     @Schema(description = "验证码（验证码登录时需要）")
     private String verificationCode;
     
-    @Schema(description = "登录类型：1-密码登录，2-验证码登录", required = true)
+    @Schema(description = "登录类型：1-密码登录，2-验证码登录", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer loginType;
 } 

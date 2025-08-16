@@ -1,45 +1,57 @@
 package com.mawai.ghgif.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.ghcommon.domain.ApiResponse;
+import com.mawai.ghgif.dto.BatchGifUploadDTO;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghgif.dto.LikeRequestDTO;
+import com.mawai.ghgif.exception.RateLimitException;
 import com.mawai.ghgif.service.GifProcessService;
+import com.mawai.ghgif.service.ValidationService;
+import com.mawai.ghgif.vo.GifVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.tuple.Pair;
 import org.springframework.http.MediaType;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/gif")
+@RequiredArgsConstructor
 @Tag(name = "GIF管理", description = "GIF上传和管理相关接口")
 public class GifController {
 
-    @Autowired
-    private GifProcessService gifProcessService;
+    private final GifProcessService gifProcessService;
+    private final ValidationService validationService;
 
     /**
      * 上传gif
-     * @param file gif文件
-     * @param userId 用户ID
-     * @param title 标题（可选）
-     * @param description 描述（可选）
+     * @param gifDTO gif上传请求
+     *
      * @return 上传结果
      */
     @Operation(summary = "cloudflare上传gif", description = "cloudflare上传gif", operationId = "r2upload")
     @PostMapping(value = "/r2upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<String> r2upload(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam("userId") Long userId,
-            @RequestParam(value = "title", required = false) String title,
-            @RequestParam(value = "description", required = false) String description) {
+    public ApiResponse<String> r2upload(@ModelAttribute GifDTO gifDTO) {
         try {
-            String url = gifProcessService.r2uploadGif(file, userId, title, description);
+            // 1. 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            gifDTO.setUserId(userId);
+
+            // 2. 验证文件
+            String fileValidation = validationService.validateFile(gifDTO.getFile());
+            if (fileValidation != null) return ApiResponse.error(400, fileValidation);
+
+            // 3. 执行上传
+            String url = gifProcessService.r2uploadGif(gifDTO);
+                
             return ApiResponse.success(url);
+        } catch (RateLimitException e) {
+            // 重新抛出限流异常为了区分异常，让 GlobalExceptionHandler 处理
+            throw e;
         } catch (Exception e) {
             return ApiResponse.error(500, "上传失败：" + e.getMessage());
         }
@@ -47,22 +59,33 @@ public class GifController {
 
     /**
      * 批量上传gif
-     * @param files gif文件列表
-     * @param userId 用户ID
-     * @param titles 标题列表
-     * @param descriptions 描述列表
+     * @param batchUploadDTO 批量上传请求DTO
+     *
      * @return 上传结果
      */
-    @Operation(summary = "批量上传gif", description = "批量上传gif", operationId = "batchUpload")
-    @PostMapping(value = "/batchUpload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<List<String>> batchUpload(
-            @RequestParam("files") List<MultipartFile> files,
-            @RequestParam("userId") Long userId,
-            @RequestParam(value = "titles", required = false) List<String> titles,
-            @RequestParam(value = "descriptions", required = false) List<String> descriptions) {
+    @Operation(summary = "cloudflare批量上传gif", description = "cloudflare批量上传gif", operationId = "r2batchUpload")
+    @PostMapping(value = "/r2BatchUpload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<List<String>> batchUpload(@ModelAttribute BatchGifUploadDTO batchUploadDTO) {
         try {
-            List<String> urls = gifProcessService.batchUploadGif(files, userId, titles, descriptions);
-            return ApiResponse.success(urls);
+            // 1. 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            batchUploadDTO.setUserId(userId);
+
+            // 2. 基础参数验证
+            String validationError = batchUploadDTO.validate();
+            if (validationError != null) return ApiResponse.error(400, validationError);
+
+            // 3. 验证所有文件
+            String fileValidation = validationService.validateFiles(batchUploadDTO.getFiles());
+            if (fileValidation != null) return ApiResponse.error(400, fileValidation);
+            
+            // 4. 转换为GifDTO列表
+            List<GifDTO> gifsDTO = batchUploadDTO.toGifDTOList();
+            
+            // 5. 执行批量上传
+            List<String> urls = gifProcessService.r2batchUploadGif(gifsDTO);
+
+            return ApiResponse.success(urls, "成功上传 " + urls.stream().filter(url -> !url.isBlank()).count() + " 个文件");
         } catch (Exception e) {
             return ApiResponse.error(500, "批量上传失败：" + e.getMessage());
         }
@@ -75,8 +98,7 @@ public class GifController {
      */
     @Operation(summary = "更新GIF下载次数", description = "更新GIF下载次数")
     @GetMapping("/record-download")
-    public ApiResponse<Boolean> recordDownload(
-            @RequestParam("fileName") String fileName) {
+    public ApiResponse<Boolean> recordDownload(@RequestParam("fileName") String fileName) {
         try {
             boolean result = gifProcessService.updateDownloadCount(fileName);
             return ApiResponse.success(result);
@@ -94,9 +116,13 @@ public class GifController {
     @PostMapping("/likeOrDislike")
     public ApiResponse<Boolean> likeOrDislike(@RequestBody LikeRequestDTO likeRequestDTO) {
         try {
+            // 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            
             boolean result = gifProcessService.updateLikeCount(
                     likeRequestDTO.getFileId(),
-                    likeRequestDTO.getUserId(),
+                    likeRequestDTO.getUserLikeCategoryId(),
+                    userId,
                     likeRequestDTO.getIsLike()
             );
             return ApiResponse.success(result);
@@ -107,13 +133,16 @@ public class GifController {
 
     /**
      * 获取用户是否喜欢此gif
+     * @param fileId gif文件id
+     * @return 是否喜欢
      */
     @Operation(summary = "获取用户是否喜欢此gif", description = "获取用户是否喜欢此gif")
     @GetMapping("/isLikeThis")
-    public ApiResponse<Boolean> isLikeThis(
-            @RequestParam("fileId") String fileId,
-            @RequestParam("userId") Long userId) {
+    public ApiResponse<Boolean> isLikeThis(@RequestParam("fileId") String fileId) {
         try {
+            // 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            
             boolean result = gifProcessService.isLikeThis(fileId, userId);
             return ApiResponse.success(result);
         } catch (Exception e) {
@@ -122,15 +151,23 @@ public class GifController {
     }
 
     /**
-     * 获取用户喜欢列表
-     * @param userId 用户ID
+     * 按分类获取用户喜欢列表
+     * @param categoryId 分类ID
+     * @param pageSize 每页数量
+     * @param pageNum 页码
      * @return 用户喜欢列表
      */
-    @Operation(summary = "获取用户喜欢列表", description = "获取用户喜欢列表")
-    @GetMapping("/user-like")
-    public ApiResponse<List<GifDTO>> userLike(@RequestParam("userId") Long userId) {
+    @Operation(summary = "按分类分页获取用户喜欢列表", description = "按分类分页获取用户喜欢列表")
+    @GetMapping("/likeByCategory")
+    public ApiResponse<List<GifVO>> userLike(
+            @RequestParam(value = "categoryId") Long categoryId,
+            @RequestParam(value = "pageNum", required = false, defaultValue = "1") Integer pageNum,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         try {
-            List<GifDTO> gifList = gifProcessService.getUserLikeList(userId);
+            // 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            
+            List<GifVO> gifList = gifProcessService.listUserLikes(userId, categoryId, pageNum, pageSize);
             return ApiResponse.success(gifList);
         } catch (Exception e) {
             return ApiResponse.error(500, "获取用户喜欢列表失败: " + e.getMessage());
@@ -154,41 +191,55 @@ public class GifController {
     }
 
     /**
-     * 分页获取gif列表
-     * @param page 页码
-     * @param pageSize 每页数量
+     * 随机获取gif列表
+     * @param lastId 最后一个gif的id
      * @return gif列表
      */
-    @Operation(summary = "分页获取gif列表", description = "分页获取gif列表")
-    @GetMapping("/list")
-    public ApiResponse<List<GifDTO>> list(
-            @RequestParam(value = "page", required = false, defaultValue = "1") Integer page,
-            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
+    @Operation(summary = "随机获取gif列表", description = "随机获取gif列表")
+    @GetMapping(value = {"/randomGifs", "/randomGifs/{lastId}"})
+    public ApiResponse<List<GifVO>> randomList(@PathVariable(required = false) String lastId) {
         try {
-            List<GifDTO> gifDTOList = gifProcessService.listGifs(page, pageSize);
-            return ApiResponse.success(gifDTOList, "success:" + gifProcessService.getTotalGifCount()); // total 拼在message里面
+            List<GifVO> gifVOList = gifProcessService.getRandomGifs(lastId);
+            return ApiResponse.success(gifVOList, "success:" + gifProcessService.getTotalGifCount()); // total 拼在message里面
         } catch (Exception e) {
-            return ApiResponse.error(500, "获取列表失败：" + e.getMessage());
+            return ApiResponse.error(500, "获取随机gif列表失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取一个随机gif
+     * @return gif
+     */
+    @Operation(summary = "获取一个随机gif", description = "获取一个随机gif")
+    @GetMapping("/randomGif")
+    public ApiResponse<GifVO> getRandomGif() {
+        try {
+            GifVO gifVO = gifProcessService.getRandomGif();
+            return ApiResponse.success(gifVO);
+        } catch (Exception e) {
+            return ApiResponse.error(500, "获取随机gif失败：" + e.getMessage());
         }
     }
     
     /**
-     * 分页获取用户上传的gif列表
-     * @param userId 用户ID
-     * @param page 页码
+     * 分页获取当前用户上传的gif列表
+     * @param pageNum 页码
      * @param pageSize 每页数量
      * @return gif列表
      */
-    @Operation(summary = "分页获取用户上传的gif列表", description = "分页获取用户上传的gif列表")
-    @GetMapping("/user/{userId}")
-    public ApiResponse<List<GifDTO>> listByUser(@PathVariable Long userId,
-            @RequestParam(value = "page", required = false, defaultValue = "1") Integer page,
+    @Operation(summary = "分页获取当前用户上传的gif列表", description = "分页获取当前用户上传的gif列表")
+    @GetMapping("/my")
+    public ApiResponse<List<GifVO>> listMyGifs(
+            @RequestParam(value = "pageNum", required = false, defaultValue = "1") Integer pageNum ,
             @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         try {
-            Pair<List<GifDTO>, Long> pair = gifProcessService.listGifsByUser(userId, page, pageSize);
+            // 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            
+            Pair<List<GifVO>, Long> pair = gifProcessService.listGifsByUser(userId, pageNum, pageSize);
             return ApiResponse.success(pair.getLeft(), "success:" + pair.getRight()); // total 拼在message里面
         } catch (Exception e) {
-            return ApiResponse.error(500, "获取列表失败：" + e.getMessage());
+            return ApiResponse.error(500, "获取当前用户上传的gif列表失败：" + e.getMessage());
         }
     }
 }

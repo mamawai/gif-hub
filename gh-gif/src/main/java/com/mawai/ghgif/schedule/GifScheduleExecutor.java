@@ -1,6 +1,7 @@
 package com.mawai.ghgif.schedule;
 
 import cn.hutool.core.collection.CollectionUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghmbplus.model.Gif;
@@ -44,7 +45,7 @@ public class GifScheduleExecutor {
     private final GifDeleteFailedService gifDeleteFailedService;
 
     // 注入线程池
-    private final Executor fileUploadExecutor;
+    private final Executor scheduledExecutor;
     private final UserLikeService userLikeService;
     private final R2FileUtils r2FileUtils;
 
@@ -53,7 +54,9 @@ public class GifScheduleExecutor {
     private static final int USER_BATCH_SIZE = 10;
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
-    private static final String USER_LIKE_KEY = "user:like:";
+
+    private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:";
+    private static final String USER_DISLIKE_KEY = "user:dislike:";
 
     /**
      * 定时任务：将Redis中GIF点赞次数和用户喜欢的GIF同步到数据库
@@ -62,6 +65,7 @@ public class GifScheduleExecutor {
      * 将Redis缓存中的点赞数据持久化到数据库中。主要包含两部分：</p>
      * 
      * <ul>
+     *   <li>同步GIF下载次数到数据库（{@link #syncDownloadCountToDatabase()}）</li>
      *   <li>同步GIF点赞计数到数据库（{@link #syncLikeCountsToDatabase()}）</li>
      *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabase()}）</li>
      * </ul>
@@ -77,21 +81,21 @@ public class GifScheduleExecutor {
         log.info("开始同步Redis中的GIF点赞数据到数据库...");
         // 使用CompletableFuture并发执行，不等待完成
         CompletableFuture
-            .runAsync(this::syncDownloadCountToDatabase, fileUploadExecutor)
+            .runAsync(this::syncDownloadCountToDatabase, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步下载计数失败: {}", e.getMessage(), e);
                 return null;
             });
             
         CompletableFuture
-            .runAsync(this::syncLikeCountsToDatabase, fileUploadExecutor)
+            .runAsync(this::syncLikeCountsToDatabase, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步点赞计数失败: {}", e.getMessage(), e);
                 return null;
             });
             
         CompletableFuture
-            .runAsync(this::syncUserLikesToDatabase, fileUploadExecutor)
+            .runAsync(this::syncUserLikesToDatabase, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步用户喜欢记录失败: {}", e.getMessage(), e);
                 return null;
@@ -106,19 +110,24 @@ public class GifScheduleExecutor {
      */
     private void syncDownloadCountToDatabase() {
         try {
-            // 从Redis获取所有需要同步的下载次数数据
-            Set<String> downloadKeys = cacheService.getKeysWithPattern(DOWNLOAD_COUNT_KEY + "*");
-            if (downloadKeys.isEmpty()) {
+            // 一次Redis请求完成：扫描匹配的key + 过滤非零值 + 获取值 + 重置为0
+            Map<String, Long> nonZeroCounters = cacheService.scanAndResetNonZeroCounters(DOWNLOAD_COUNT_KEY + "*");
+            
+            if (nonZeroCounters.isEmpty()) {
                 log.info("没有GIF下载记录需要同步");
                 return;
             }
             
-            log.info("发现{}个GIF下载记录需要同步", downloadKeys.size());
+            log.info("发现{}个GIF下载记录需要同步", nonZeroCounters.size());
             int prefixLength = DOWNLOAD_COUNT_KEY.length();
 
             // 批量处理，每批最多100条记录
             List<Gif> gifsToUpdate = new ArrayList<>();
-            for (String countKey : downloadKeys) {
+            
+            for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
+                String countKey = entry.getKey();
+                Long downloadCount = entry.getValue();
+                
                 try {
                     // 提取ID - 使用前缀长度直接获取
                     if (countKey.length() <= prefixLength) {
@@ -126,9 +135,6 @@ public class GifScheduleExecutor {
                         continue;
                     }
                     String gifId = countKey.substring(prefixLength);
-
-                    // 获取下载次数
-                    Long downloadCount = cacheService.getAndReset(countKey);
 
                     if (downloadCount != null && downloadCount > 0) {
                         // 查询GIF记录
@@ -174,7 +180,7 @@ public class GifScheduleExecutor {
      * 处理流程包括：</p>
      * 
      * <ol>
-     *   <li>从Redis获取所有符合{@code LIKE_COUNT_KEY + "*"}模式的键</li>
+     *   <li>扫描匹配的key + 过滤非零值 + 获取值 + 重置为0</li>
      *   <li>提取每个键中的GIF ID</li>
      *   <li>获取点赞计数并原子性地重置Redis计数</li>
      *   <li>查询对应GIF记录并增加点赞数（增量更新）</li>
@@ -185,32 +191,33 @@ public class GifScheduleExecutor {
      */
     private void syncLikeCountsToDatabase() {
         try {
-            // 直接从Redis获取所有需要同步的点赞数据
-            Set<String> likeKeys = cacheService.getKeysWithPattern(LIKE_COUNT_KEY + "*");
-            if (likeKeys.isEmpty()) {
+            // 一次Redis请求完成：扫描匹配的key + 过滤非零值 + 获取值 + 重置为0
+            Map<String, Long> nonZeroCounters = cacheService.scanAndResetNonZeroCounters(LIKE_COUNT_KEY + "*");
+            
+            if (nonZeroCounters.isEmpty()) {
                 log.info("没有GIF点赞和取消点赞记录需要同步");
                 return;
             }
             
-            log.info("发现{}个GIF点赞和取消点赞记录需要同步", likeKeys.size());
+            log.info("发现{}个GIF点赞和取消点赞记录需要同步", nonZeroCounters.size());
             int prefixLength = LIKE_COUNT_KEY.length();
             
             // 批量处理，每批最多100条记录
             List<Gif> gifsToUpdate = new ArrayList<>();
             
-            for (String countKey : likeKeys) {
+            for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
+                String countKey = entry.getKey();
+                Long likeCount = entry.getValue();
+                
                 try {
                     // 提取ID - 使用前缀长度直接获取
                     if (countKey.length() <= prefixLength) {
-                        log.warn("无效的键格式: {}", countKey);
+                        log.info("无效的键格式: {}", countKey);
                         continue;
                     }
                     String gifId = countKey.substring(prefixLength);
                     
-                    // 获取点赞数并重置为0（原子操作）
-                    Long likeCount = cacheService.getAndReset(countKey);
-                    
-                    if (likeCount != null && likeCount > 0) {
+                    if (likeCount != null && likeCount != 0) {
                         // 查询GIF记录
                         Gif gif = gifService.getById(gifId);
                         if (gif != null) {
@@ -219,7 +226,7 @@ public class GifScheduleExecutor {
                             gif.setLikeCount(newLikeCount);
                             gif.setUpdatedAt(LocalDateTime.now());
                             gifsToUpdate.add(gif);
-                            log.debug("准备更新GIF(ID:{})点赞数增量: +{}, 新总数: {}", gifId, likeCount, newLikeCount);
+                            log.info("准备更新GIF(ID:{})点赞数增量: {}, 新总数: {}", gifId, likeCount, newLikeCount);
                             
                             // 达到批量大小时更新数据库
                             if (gifsToUpdate.size() >= BATCH_SIZE) {
@@ -262,8 +269,8 @@ public class GifScheduleExecutor {
      */
     private void syncUserLikesToDatabase() {
         try {
-            // 获取所有有like/dislike数据的用户ID
-            Set<String> userIds = cacheService.getUserIdsWithLikeData(USER_LIKE_KEY);
+            // 获取所有有like/dislike数据的用户ID（使用新数据结构）
+            Set<String> userIds = cacheService.getUserIdsWithLikeDataOptimized(USER_LIKE_CATEGORY_KEY, USER_DISLIKE_KEY);
 
             if (userIds.isEmpty()) {
                 log.info("没有有效的用户喜欢记录需要同步");
@@ -278,43 +285,46 @@ public class GifScheduleExecutor {
 
             for (String userId : userIds) {
                 try {
-                    // 直接使用userId，构建userKey
+                    // 直接使用userId，构建key
                     Long userIdLong = Long.parseLong(userId);
-                    String userKey = USER_LIKE_KEY + userId;
+                    String likeHashKey = USER_LIKE_CATEGORY_KEY + userId;
+                    String dislikeSetKey = USER_DISLIKE_KEY + userId;
 
-                    // 获取Redis中该用户喜欢的所有GIF ID (从set结构中获取like和dislike字段) 再清空set
-                    String oldKey = userKey + ":old";
-
-                    // 先备份数据，再获取并清空（确保数据安全）
-                    String likeKey = userKey + ":like";
-                    String dislikeKey = userKey + ":dislike";
-                    String oldLikeKey = oldKey + ":like";
-                    String oldDislikeKey = oldKey + ":dislike";
-
-                    // 只有当key存在时才进行复制
-                    if (cacheService.hasKey(likeKey)) {
-                        cacheService.copy(likeKey, oldLikeKey);
-                    }
-                    if (cacheService.hasKey(dislikeKey)) {
-                        cacheService.copy(dislikeKey, oldDislikeKey);
-                    }
-
-                    Map<String, Set<String>> likeDislike = cacheService.getSetLikeDislike(userKey, true);
-                    Set<String> likedGifIds = likeDislike.get("like");
-                    Set<String> dislikeGifIds = likeDislike.get("dislike");
+                    // 获取点赞Hash（安全获取，自动创建oldKey备份）
+                    Map<String, Long> likedGifMapping = cacheService.getLikeCategoryIdsSafely(likeHashKey, true);
+                    // 获取不喜欢Set（安全获取，自动创建oldKey备份）
+                    Set<String> dislikeGifIds = cacheService.getStringSetSafely(dislikeSetKey, true);
 
                     // 如果两个集合都为空，则跳过（不计入processedCount）
-                    if (CollectionUtil.isEmpty(likedGifIds) && CollectionUtil.isEmpty(dislikeGifIds)) {
+                    if (CollectionUtil.isEmpty(likedGifMapping) && CollectionUtil.isEmpty(dislikeGifIds)) {
                         log.info("用户{}没有需要同步的数据，跳过", userId);
                         continue;
                     }
 
-                    // 不用查询数据库，直接保存和删除，因为redis保存的是增量数据
-                    for (String gifId : likedGifIds) {
-                        batchNewLikes.add(new UserLike().setUserId(userIdLong).setGifId(Long.parseLong(gifId)).setCreatedAt(LocalDateTime.now()));
+                    // 处理点赞记录（Hash中已包含分类信息）
+                    for (Map.Entry<String, Long> entry : likedGifMapping.entrySet()) {
+                        try {
+                            String gifId = entry.getKey();
+                            Long categoryId = entry.getValue();
+                            
+                            UserLike userLike = new UserLike()
+                                .setUserId(userIdLong)
+                                .setGifId(Long.parseLong(gifId))
+                                .setUserLikeCategoryId(categoryId);
+                            
+                            batchNewLikes.add(userLike);
+                        } catch (Exception e) {
+                            log.error("处理用户{}的点赞记录失败: gifId={}, 错误: {}", userId, entry.getKey(), e.getMessage());
+                        }
                     }
+                    
+                    // 处理取消点赞记录
                     for (String gifId : dislikeGifIds) {
-                        batchDeleteLikes.add(new UserLike().setUserId(userIdLong).setGifId(Long.parseLong(gifId)));
+                        try {
+                            batchDeleteLikes.add(new UserLike().setUserId(userIdLong).setGifId(Long.parseLong(gifId)));
+                        } catch (Exception e) {
+                            log.error("处理用户{}的取消点赞记录失败: gifId={}, 错误: {}", userId, gifId, e.getMessage());
+                        }
                     }
 
                     processedCount++; // 只有成功处理的用户才计数
@@ -322,15 +332,20 @@ public class GifScheduleExecutor {
                     // 每10个有效用户保存一次
                     if (processedCount % USER_BATCH_SIZE == 0) {
                         try {
-                            // 保存
+                            // 保存或更新（处理分类变更情况）
                             if (!batchNewLikes.isEmpty()) {
-                                userLikeService.saveBatch(batchNewLikes);
-                                log.info("批量保存{}条喜欢记录", batchNewLikes.size());
+                                userLikeService.insertOrUpdateBatchByUniqueKey(batchNewLikes);
+                                log.info("批量保存/更新{}条喜欢记录", batchNewLikes.size());
                                 batchNewLikes.clear();
                             }
-                            // 删除
+                            // 删除 - 遍历删除
                             if (!batchDeleteLikes.isEmpty()) {
-                                userLikeService.removeBatchByIds(batchDeleteLikes);
+                                for (UserLike userLike : batchDeleteLikes) {
+                                    LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
+                                    deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
+                                                .eq(UserLike::getGifId, userLike.getGifId());
+                                    userLikeService.remove(deleteWrapper);
+                                }
                                 log.info("批量删除{}条不喜欢记录", batchDeleteLikes.size());
                                 batchDeleteLikes.clear();
                             }
@@ -349,11 +364,16 @@ public class GifScheduleExecutor {
             // 处理剩余记录
             try {
                 if (!batchNewLikes.isEmpty()) {
-                    userLikeService.saveBatch(batchNewLikes);
-                    log.info("批量保存剩余的{}条喜欢记录", batchNewLikes.size());
+                    userLikeService.insertOrUpdateBatchByUniqueKey(batchNewLikes);
+                    log.info("批量保存/更新剩余的{}条喜欢记录", batchNewLikes.size());
                 }
                 if (!batchDeleteLikes.isEmpty()) {
-                    userLikeService.removeBatchByIds(batchDeleteLikes);
+                    for (UserLike userLike : batchDeleteLikes) {
+                        LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
+                        deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
+                                    .eq(UserLike::getGifId, userLike.getGifId());
+                        userLikeService.remove(deleteWrapper);
+                    }
                     log.info("批量删除剩余的{}条不喜欢记录", batchDeleteLikes.size());
                 }
             } catch (Exception e) {

@@ -11,12 +11,16 @@ import lombok.NoArgsConstructor;
 @Schema(description = "点赞请求")
 public class LikeRequestDTO {
 
-    @Schema(description = "gif文件id", required = true)
+    @Schema(description = "gif文件id", requiredMode = Schema.RequiredMode.REQUIRED)
     private String fileId;
 
-    @Schema(description = "用户id", required = true)
-    private Long userId;
+    /**
+     * 分类id
+     * 如果为空，则表示取消点赞
+     */
+    @Schema(description = "分类id", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private Long userLikeCategoryId;
 
-    @Schema(description = "是否点赞", required = true)
+    @Schema(description = "是否点赞", requiredMode = Schema.RequiredMode.REQUIRED)
     private Boolean isLike;
 }

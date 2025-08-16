@@ -16,7 +16,7 @@ import lombok.experimental.Accessors;
 
 /**
  * <p>
- * 用户收藏表
+ * 用户喜欢分类表
  * </p>
  *
  * @author mawai
@@ -26,17 +26,17 @@ import lombok.experimental.Accessors;
 @Setter
 @ToString
 @Accessors(chain = true)
-@TableName("user_favorite")
-@Schema(name = "UserFavorite", description = "用户收藏表")
-public class UserFavorite implements Serializable {
+@TableName("user_like_category")
+@Schema(name = "UserCategory", description = "用户喜欢分类表")
+public class UserCategory implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
     /**
-     * 收藏ID
+     * 喜欢分类ID
      */
-    @Schema(description = "收藏ID")
+    @Schema(description = "喜欢分类ID")
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
@@ -48,11 +48,11 @@ public class UserFavorite implements Serializable {
     private Long userId;
 
     /**
-     * GIF ID
+     * 分类名称
      */
-    @TableField("gif_id")
-    @Schema(description = "GIF ID")
-    private Long gifId;
+    @TableField("category_name")
+    @Schema(description = "分类名称")
+    private String categoryName;
 
     /**
      * 创建时间

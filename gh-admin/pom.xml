@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <java.version>17</java.version>
+        <java.version>21</java.version>
     </properties>
     <dependencies>
         <dependency>
@@ -25,6 +25,10 @@
         <dependency>
             <groupId>com.mawai</groupId>
             <artifactId>gh-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
         </dependency>
         <dependency>
             <groupId>org.mapstruct</groupId>
@@ -42,18 +46,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
-            <!-- 配置插件来支持 MapStruct 注解处理 -->
+            <!-- 配置插件来支持 MapStruct 注解处理 https://blog.csdn.net/weixin_45697659/article/details/131001384-->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.10.1</version>
+                <version>${maven-compiler-plugin.version}</version>
                 <configuration>
                     <!-- 配置 Java 版本 -->
-                    <source>21</source>
-                    <target>21</target>
-                    <compilerArgs>
-                        <arg>-Amapstruct.defaultComponentModel=spring</arg> <!-- 如果你使用 Spring -->
-                    </compilerArgs>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>

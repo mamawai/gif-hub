@@ -2,4 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.mawai.ghmbplus.dao.UserLikeMapper">
 
+    <!-- 批量基于唯一键的插入或更新操作 -->
+    <insert id="insertOrUpdateBatchByUniqueKey" parameterType="java.util.List">
+        INSERT INTO user_like (user_id, gif_id, user_like_category_id)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.gifId}, #{item.userLikeCategoryId})
+        </foreach>
+        ON DUPLICATE KEY UPDATE user_like_category_id = VALUES(user_like_category_id)
+    </insert>
+
 </mapper>

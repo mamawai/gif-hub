@@ -7,6 +7,7 @@ import com.mawai.ghweixin.service.EmailAuthService;
 import com.mawai.ghweixin.vo.LoginResultVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -17,11 +18,11 @@ import org.springframework.web.bind.annotation.*;
 @Slf4j
 @RestController
 @RequestMapping("/user")
+@RequiredArgsConstructor
 @Tag(name = "邮箱认证接口", description = "邮箱注册登录相关接口")
 public class EmailAuthController {
 
-    @Autowired
-    private EmailAuthService emailAuthService;
+    private final EmailAuthService emailAuthService;
 
     /**
      * 发送验证码

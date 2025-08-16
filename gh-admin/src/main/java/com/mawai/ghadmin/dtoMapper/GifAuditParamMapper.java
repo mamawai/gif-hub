@@ -4,7 +4,7 @@ import com.mawai.ghadmin.dto.GifAuditDTO;
 import com.mawai.ghmbplus.model.GifAudit;
 import org.mapstruct.Mapper;
 
-@Mapper
+@Mapper(componentModel = "spring")
 public interface GifAuditParamMapper {
 
     GifAuditDTO toGifAuditDTO (GifAudit gifAudit);

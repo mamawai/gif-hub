@@ -48,6 +48,13 @@ public class Gif implements Serializable {
     private Long userId;
 
     /**
+     * 随机数
+     */
+    @TableField("random_number")
+    @Schema(description = "随机数")
+    private Double randomNumber;
+
+    /**
      * GIF标题
      */
     @TableField("title")

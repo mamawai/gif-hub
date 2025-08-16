@@ -3,12 +3,14 @@ package com.mawai.ghgif.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.ghcommon.utils.SpringUtils;
-import com.mawai.ghgif.dtoMapper.GifParamMapper;
+import com.mawai.ghgif.annotation.RateLimiter;
+import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.util.R2FileUtils;
+import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.UserLike;
@@ -21,9 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -39,14 +38,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * GIF处理服务实现类
@@ -61,11 +57,6 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final UserLikeService userLikeService;
     private final GifParamMapper gifParamMapper;
     private final GifDeleteService gifDeleteService;
-    // 解决self-invocation问题
-    // 循环依赖解决
-    @Lazy
-    @Autowired
-    private GifProcessService self;
     private final CacheService cacheService;
     // 注入线程池
     private final Executor fileUploadExecutor;
@@ -106,11 +97,9 @@ public class GifProcessServiceImpl implements GifProcessService {
     @Override
     public Long getTotalGifCount() {
         try {
-            Object countObj = cacheService.get(TOTAL_GIF_COUNT_KEY);
-            if (countObj instanceof Integer) {
-                return ((Integer) countObj).longValue();
-            } else if (countObj instanceof Long) {
-                return (Long) countObj;
+            Number countObj = cacheService.getNumber(TOTAL_GIF_COUNT_KEY);
+            if (countObj != null) {
+                return countObj.longValue();
             } else {
                 log.warn("GIF总数缓存有问题，请检查Redis是否正常");
                 // 手动查库 -- 兜底
@@ -126,66 +115,21 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 判断用户是否喜欢此GIF
-     * 情况：用户点击喜欢数据库没有记录，如果此时还没同步数据库 memberKey有数据，数据库没数据
-     *       如果此时memberKey clear，如果此时数据库正在写入，用户调用了isLikeThis，由于memberKey都是空则查询oldKey
-     *       如果此时点击了不喜欢，memberKey有数据，用户调用isLikeThis，应先查询memberKey
-     *       memberKey优先级是最高的，如果memberKey没有数据则查询oldKey
-     *
-     * @param fileId GIF文件ID
      * @param userId 用户ID
-     * @return 是否喜欢
-     */
-    @Override
-    public boolean isLikeThis(String fileId, Long userId) {
-        String memberKey = USER_LIKE_KEY + userId;
-        if (cacheService.get(memberKey + ":like") == null && cacheService.get(memberKey + ":dislike") == null) {
-            // 如果没有memberKey 直接查数据库
-            return userLikeService.getOne(new LambdaQueryWrapper<UserLike>().eq(UserLike::getUserId, userId).eq(UserLike::getGifId, fileId)) != null;
-        }
-        Map<String, Set<String>> likesDislikes = cacheService.getSetLikeDislike(memberKey, false);
-        Set<String> likes= likesDislikes.get("like");
-        Set<String> dislikes = likesDislikes.get("dislike");
-        if (likes != null && likes.contains(fileId)) {
-            return true;
-        } else if (dislikes != null && dislikes.contains(fileId)) {
-            return false;
-        } else {
-            // 如果memberKey 没有数据则查询oldKey
-            String oldKey = USER_LIKE_KEY + userId + ":old";
-            if (cacheService.get(oldKey + ":like") == null && cacheService.get(oldKey + ":dislike") == null) {
-                // 如果没有oldKey 则查询数据库
-                return userLikeService.getOne(new LambdaQueryWrapper<UserLike>().eq(UserLike::getUserId, userId).eq(UserLike::getGifId, fileId)) != null;
-            }
-            // 如果有oldKey 用oldKey数据
-            Map<String, Set<String>> oldLikesDislikes = cacheService.getSetLikeDislike(oldKey, false);
-            Set<String> oldLikes = oldLikesDislikes.get("like");
-            Set<String> oldDislikes = oldLikesDislikes.get("dislike");
-            if (oldLikes != null && oldLikes.contains(fileId)) {
-                return true;
-            } else if (oldDislikes != null && oldDislikes.contains(fileId)) {
-                return false;
-            } else {
-                // 如果oldKey没有数据 则查询数据库
-                return userLikeService.getOne(new LambdaQueryWrapper<UserLike>().eq(UserLike::getUserId, userId).eq(UserLike::getGifId, fileId)) != null;
-            }
-        }
-    }
-
-    /**
      * 增加GIF总数（+1）
      */
     private void incrementTotalGifCount(Long userId) {
         try {
             cacheService.increment(TOTAL_GIF_COUNT_KEY, 1);
             cacheService.increment(TOTAL_GIF_COUNT_KEY + ":" + userId, 1, 60, TimeUnit.MINUTES);
-            log.debug("GIF总数+1");
+            log.info("GIF总数+1");
         } catch (Exception e) {
             log.error("增加GIF总数失败: {}", e.getMessage(), e);
         }
     }
 
     /**
+     * @param userId 用户ID
      * 减少GIF总数（-1）
      */
     private void decrementTotalGifCount(Long userId) {
@@ -198,43 +142,33 @@ public class GifProcessServiceImpl implements GifProcessService {
         }
     }
 
-    // GIF大小限制，默认10MB
-    @Value("${gif.max-size:10485760}")
-    private long maxGifSize;
-
     private static final String LIKE_COUNT_KEY = "gif:like:";
-    private static final String USER_LIKE_KEY = "user:like:";
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
     private static final int EXPIRE_TIME = 2; // 过期时间
     private static final String GIF_DELETE_COUNT_KEY = "gif:delete:count"; // 删除计数器键
     private static final int DELETE_COUNT_THRESHOLD = 1; // 删除阈值
     private static final String DELETE_TASK_KEY = "gif:delete:task"; // 删除任务键
+    private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:"; // 用户分类点赞缓存键
+    private static final String USER_DISLIKE_KEY = "user:dislike:"; // 用户不喜欢缓存键
 
     /**
      * 上传单个GIF文件
-     * @param file 文件对象
-     * @param userId 用户ID
-     * @param title 标题（可选）
-     * @param description 描述（可选）
+     * @param gifDTO GIF请求
+     *
      * @return 文件访问URL
      * @throws FileUploadException 文件上传异常
      */
     @Override
+    @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试")
     @Transactional(rollbackFor = Exception.class)
-    public String r2uploadGif(MultipartFile file, Long userId, String title, String description) throws FileUploadException {
-        // 校验文件类型
-        String originalFilename = file.getOriginalFilename();
-        if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".gif")) {
-            throw new IllegalArgumentException("只能上传GIF格式的文件");
-        }
+    public String r2uploadGif(GifDTO gifDTO) throws FileUploadException {
+        // 获取请求内容
+        MultipartFile file = gifDTO.getFile();
+        Long userId = gifDTO.getUserId();
+        String title = gifDTO.getTitle();
+        String description = gifDTO.getDescription();
 
-        // 校验文件大小
-        if (file.getSize() > maxGifSize) {
-            throw new IllegalArgumentException("GIF文件大小超过" + (maxGifSize / 1024 / 1024) + "MB限制");
-        }
-
-        // 本地暂时不压缩(skip)
         // auto close stream
         try (InputStream inputStream = file.getInputStream()) {
 
@@ -263,7 +197,7 @@ public class GifProcessServiceImpl implements GifProcessService {
                 // 保存到数据库
                 Gif gif = new Gif();
                 gif.setUserId(userId);
-                gif.setTitle(StringUtils.hasText(title) ? title : originalFilename);
+                gif.setTitle(StringUtils.hasText(title) ? title : file.getOriginalFilename());
                 gif.setDescription(description);
                 gif.setFileUrl(fileUrl);
                 gif.setFileSize((int) (file.getSize() / 1024));
@@ -271,11 +205,10 @@ public class GifProcessServiceImpl implements GifProcessService {
                 gif.setViewCount(0);
                 gif.setLikeCount(0);
                 gif.setDownloadCount(0);
-                gif.setCreatedAt(LocalDateTime.now());
-                gif.setUpdatedAt(LocalDateTime.now());
 
                 // 保存GIF信息
-                gifService.save(gif);
+                if (gifService.insertOne(gif)) log.info("保存GIF文件成功");
+                else throw new IOException("保存GIF文件失败返回false");
                 
                 //TODO 增加GIF总数 -- 暂时放在这里等后期整合到Audit模块中，因为图片审核通过是在这个模块中完成
                 incrementTotalGifCount(userId);
@@ -293,42 +226,28 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 批量上传GIF文件（包含压缩处理）
-     * @param files 文件对象列表
-     * @param userId 用户ID
+     * 批量上传GIF文件
+     * @param gifsDTO 文件对象列表
+     *
      * @return 文件访问URL列表，失败的位置为空字符串
-     * @throws IOException IO异常
      */
     @Override
-    public List<String> batchUploadGif(List<MultipartFile> files, Long userId, List<String> titles, List<String> descriptions) throws IOException {
-        // 校验文件类型
-        for (MultipartFile file : files) {
-            String originalFilename = file.getOriginalFilename();
-            if (originalFilename != null && !originalFilename.toLowerCase().endsWith(".gif")) {
-                throw new IllegalArgumentException("只能上传GIF格式的文件：" + originalFilename);
-            }
-        }
-        
-        int fileCount = files.size();
-        
+    public List<String> r2batchUploadGif(List<GifDTO> gifsDTO) {
+        int fileCount = gifsDTO.size();
         // 创建固定大小的结果数组，保持顺序
         String[] urlArray = new String[fileCount];
         Exception[] exceptionArray = new Exception[fileCount];
         
         // 创建并行任务
         List<CompletableFuture<Void>> futures = new ArrayList<>();
-        
-        for (int i = 0; i < fileCount; i++) {
+
+        for (int i = 0; i < gifsDTO.size(); i++) {
             final int index = i;
+            GifDTO gifDTO = gifsDTO.get(i);
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
-                    MultipartFile file = files.get(index);
-                    String title = (titles != null && index < titles.size()) ? titles.get(index) : null;
-                    String description = (descriptions != null && index < descriptions.size()) ? descriptions.get(index) : null;
-                    
-                    // 使用self引用调用事务方法，确保事务生效
-                    String url = self.r2uploadGif(file, userId, title, description);
-                    
+                    // 使用 getAopProxy 获取代理对象 防止事务失效
+                    String url = SpringUtils.getAopProxy(this).r2uploadGif(gifDTO);
                     // 按原始索引位置存储结果
                     urlArray[index] = url;
                 } catch (Exception e) {
@@ -336,7 +255,7 @@ public class GifProcessServiceImpl implements GifProcessService {
                     exceptionArray[index] = e;
                 }
             }, fileUploadExecutor);
-            
+
             futures.add(future);
         }
         
@@ -346,7 +265,7 @@ public class GifProcessServiceImpl implements GifProcessService {
         // 遍历异常打印log
         for (int i = 0; i < fileCount; i++) {
             if (exceptionArray[i] != null) {
-                log.error("上传第{}个GIF文件失败: {}", i, exceptionArray[i].getMessage());
+                log.error("上传第{}个GIF文件失败: {}", i + 1, exceptionArray[i].getMessage());
             }
         }
         
@@ -385,29 +304,41 @@ public class GifProcessServiceImpl implements GifProcessService {
     /**
      * 更新点赞次数 - 使用redis实现
      * @param fileId 文件ID
+     * @param userLikeCategoryId 用户点赞分类ID
      * @param userId 用户ID
      * @param isLike 点赞还是取消点赞
      * @return 是否更新成功
      */
     @Override
-    public boolean updateLikeCount(String fileId, Long userId, Boolean isLike) {
+    public boolean updateLikeCount(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike) {
         try {
-            // 创建redis key
+            // 创建redisKey
             String countKey = LIKE_COUNT_KEY + fileId;
-            String memberKey = USER_LIKE_KEY + userId;
-            // 根据喜欢还是不喜欢进行 increase 或者 decrease 并续期 10分钟
-            // lua 脚本实现
+            String likeHashKey = USER_LIKE_CATEGORY_KEY + userId;
+            String dislikeSetKey = USER_DISLIKE_KEY + userId;
+            
             if (isLike) {
-                // 点赞次数+1 向set的like键中添加
-                cacheService.incrementAndAddToSet(countKey, memberKey, fileId, EXPIRE_TIME, TimeUnit.MINUTES);
+                // 验证分类ID不能为空
+                if (userLikeCategoryId == null) {
+                    log.error("点赞时分类ID不能为空: fileId={}, userId={}", fileId, userId);
+                    return false;
+                }
+                
+                // 点赞操作：检查dislike set，有则删除；无论如何都在like hash中设置
+                cacheService.likeOperationOptimized(countKey, likeHashKey, dislikeSetKey, fileId, userLikeCategoryId, EXPIRE_TIME, TimeUnit.MINUTES);
+                
+                log.info("用户{}对GIF{}点赞成功，分类ID: {}", userId, fileId, userLikeCategoryId);
             } else {
-                // 点赞次数-1 向dislike的dislike键中添加
-                cacheService.decrementAndRemoveFromSet(countKey, memberKey, fileId, EXPIRE_TIME, TimeUnit.MINUTES);
+                // 取消点赞操作：检查like hash，有则删除；没有则在dislike set中标记
+                cacheService.dislikeOperationOptimized(countKey, likeHashKey, dislikeSetKey, fileId, EXPIRE_TIME, TimeUnit.MINUTES);
+                
+                log.info("用户{}对GIF{}取消点赞成功", userId, fileId);
             }
             return true;
         } catch (Exception e) {
             // 记录日志
-            log.error("更新点赞次数失败: {}", e.getMessage());
+            log.error("更新点赞次数失败: fileId={}, userId={}, isLike={}, categoryId={}, 错误: {}", 
+                     fileId, userId, isLike, userLikeCategoryId, e.getMessage(), e);
             return false;
         }
     }
@@ -451,7 +382,9 @@ public class GifProcessServiceImpl implements GifProcessService {
                     if (acquired) {
                         try {
                             // 发布事件
-                            SpringUtils.context().publishEvent(new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD));
+                            SpringUtils.context().publishEvent(
+                                    new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD)
+                            );
                         } finally {
                             // 释放锁
                             cacheService.delete(DELETE_TASK_KEY);
@@ -466,36 +399,6 @@ public class GifProcessServiceImpl implements GifProcessService {
             return false; // 删除失败就返回
         }
     }
-
-    /**
-     * 分页获取GIF文件列表
-     * @param page 页码
-     * @param pageSize 每页数量
-     * @return GIF文件URL列表
-     */
-    @Override
-    public List<GifDTO> listGifs(Integer page, Integer pageSize) {
-        // 创建分页对象
-        Page<Gif> pageParam = new Page<>(page, pageSize);
-        // 查询总数量的时候禁用searchCount 性能很低 使用redis维护总数
-        pageParam.setSearchCount(false);
-        
-        // 创建查询条件
-        LambdaQueryWrapper<Gif> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(Gif::getStatus, 1).orderByDesc(Gif::getCreatedAt);
-
-        // 执行分页查询
-        Page<Gif> resultPage = gifService.page(pageParam, queryWrapper);
-        List<Gif> gifList = resultPage.getRecords();
-
-        // 转换为DTO
-        List<GifDTO> resList = new ArrayList<>();
-        for (Gif gif : gifList) {
-            GifDTO gifDTO = gifParamMapper.toGifDTO(gif);
-            resList.add(gifDTO);
-        }
-        return resList;
-    }
     
     /**
      * 获取用户上传的GIF文件列表
@@ -505,23 +408,16 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @return GIF文件URL列表
      */
     @Override
-    public Pair<List<GifDTO>, Long> listGifsByUser(Long userId, Integer page, Integer pageSize) {
+    public Pair<List<GifVO>, Long> listGifsByUser(Long userId, Integer page, Integer pageSize) {
         // 创建分页对象
         Page<Gif> pageParam = new Page<>(page, pageSize);
         // 先查redis看是否有这个用户上传gif数量的统计
         String countKey = TOTAL_GIF_COUNT_KEY + ":" + userId;
-        Object countObject = cacheService.get(countKey);
-        // 如果redis有这个用户上传gif数量的统计，则设置total，跳过searchCount, 如果数量发生变化，这个redis会自动更新, 如rediskey过期，则重新查询数据库
+        Number countObject = cacheService.getNumber(countKey);
+        // 如果redis有这个用户上传gif数量的统计，则设置total，跳过searchCount, 如果数量发生变化，这个redis会自动更新, 如redisKey过期，则重新查询数据库
         if (countObject != null) {
             pageParam.setSearchCount(false);
-            // 类型转换问题
-            if (countObject instanceof Integer) {
-                pageParam.setTotal(((Integer) countObject).longValue());
-            } else if (countObject instanceof Long) {   
-                pageParam.setTotal((Long) countObject);
-            } else {
-                log.warn("用户上传gif数量统计缓存数据异常: {}", countObject);
-            }
+            pageParam.setTotal(countObject.longValue());
         }
         // 查询指定用户上传的GIF
         LambdaQueryWrapper<Gif> queryWrapper = new LambdaQueryWrapper<>();
@@ -536,54 +432,389 @@ public class GifProcessServiceImpl implements GifProcessService {
             cacheService.set(countKey, resultPage.getTotal(), Duration.ofMinutes(60));
         }
 
-        // 转换为DTO
-        List<GifDTO> resList = new ArrayList<>();
+        // 转换为VO
+        List<GifVO> resList = new ArrayList<>();
         for (Gif gif : gifList) {
-            GifDTO gifDTO = gifParamMapper.toGifDTO(gif);
-            resList.add(gifDTO);
+            resList.add(gifParamMapper.toGifVO(gif));
         }
+        
+        // 批量合并缓存中的点赞数量
+        batchMergeRealTimeLikeCount(resList);
 
         return new ImmutablePair<>(resList, resultPage.getTotal());
     }
 
     /**
-     * 获取用户喜欢列表
+     * 按分类分页获取用户喜欢列表 -- 性能比较差
+     * 
+     * <p>该方法采用缓存+数据库的混合查询策略来保证数据完整性和一致性：</p>
+     * <ul>
+     *   <li><strong>获取dislike集合：</strong>从Redis获取用户不喜欢的gif ID集合（当前+备份）</li>
+     *   <li><strong>缓存查询：</strong>从Redis的userLikeCategoryKey（Hash结构）中过滤指定分类的gif（缓存中like/dislike互斥）</li>
+     *   <li><strong>数据库查询：</strong>从UserLike表中查询对应用户和分类的记录，并排除dislike集合中的gif</li>
+     *   <li><strong>数据合并：</strong>合并缓存和数据库数据，去重处理</li>
+     *   <li><strong>分页处理：</strong>对合并后的数据进行分页</li>
+     * </ul>
+     * 
+     * <p><strong>核心逻辑：</strong>缓存中的like和dislike是互斥的，但数据库可能包含已被用户取消喜欢的旧记录，
+     * 因此在数据库查询时必须排除dislike集合中的gif ID，确保结果的准确性。</p>
+     * 
      * @param userId 用户ID
+     * @param categoryId 分类ID
+     * @param pageNum 页码
+     * @param pageSize 每页数量
      * @return 用户喜欢列表
      */
     @Override
-    public List<GifDTO> getUserLikeList(Long userId) {
-        // 获取用户喜欢列表 （从redis的hash结构和数据库中获取）
-        String memberKey = USER_LIKE_KEY + userId;
-        Map<String, Set<String>> likeDislike = cacheService.getSetLikeDislike(memberKey, false);
-        Set<String> idSet = likeDislike.get("like");
-        Set<String> filterIdSet = likeDislike.get("dislike");
+    public List<GifVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize) {
+        try {
+            // 1. 获取用户不喜欢的gif ID集合（用于在数据库查询时排除）
+            Set<String> dislikedGifIds = getDislikedGifIds(userId);
 
-        // 从数据库中获取
-        LambdaQueryWrapper<UserLike> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(UserLike::getUserId, userId);
-        List<UserLike> userLikeList = userLikeService.list(queryWrapper);
+            // 2.查缓存所有的gifIds的Map
+            Map<String, Long> cacheGifIdsMap = getCacheGifIds(userId);
+            
+            // 3. 从数据库中查询指定分类的gif ID集合（排除dislike的）
+            Set<Long> dbGifIds = getDbGifIdsByCategory(userId, categoryId, dislikedGifIds);
 
-        // 合并redis和数据库中的gifId并且去重
-        idSet.addAll(userLikeList.stream()
-                .map(UserLike::getGifId)
-                .map(String::valueOf)
-                .toList());
+            // 4.遍历cacheGifIdsMap，如果key在dbGifIds中并且value不等于categoryId，则删除dbGifIds中的value
+            for (Map.Entry<String, Long> entry : cacheGifIdsMap.entrySet()) {
+                if (dbGifIds.contains(Long.parseLong(entry.getKey())) && !entry.getValue().equals(categoryId)) {
+                    dbGifIds.remove(Long.parseLong(entry.getKey()));
+                } else if (entry.getValue().equals(categoryId)) {
+                    // 如果value等于categoryId，则添加到dbGifIds中 Set去重
+                    dbGifIds.add(Long.parseLong(entry.getKey()));
+                }
+            }
+            
+            if (dbGifIds.isEmpty()) {
+                log.info("用户{}分类{}下没有喜欢的GIF", userId, categoryId);
+                return new ArrayList<>();
+            }
+            
+            // 4. 转换为List并排序（按ID倒序，最新的在前面）
+            List<Long> sortedGifIds = dbGifIds.stream()
+                    .sorted(Collections.reverseOrder())
+                    .toList();
+            
+            // 5. 分页处理
+            int startIndex = (pageNum - 1) * pageSize;
+            int endIndex = Math.min(startIndex + pageSize, sortedGifIds.size());
+            
+            if (startIndex >= sortedGifIds.size()) {
+                log.info("用户{}分类{}分页超出范围: pageNum={}, pageSize={}, total={}", 
+                        userId, categoryId, pageNum, pageSize, sortedGifIds.size());
+                return new ArrayList<>();
+            }
+            
+            List<Long> pageGifIds = sortedGifIds.subList(startIndex, endIndex);
+            
+            // 6. 直接查询状态正常的gif详情（一次数据库请求）
+            List<Gif> gifs = getGifsByIdsWithStatus(pageGifIds);
 
-        // 移除用户不喜欢的gifId
-        idSet.removeAll(filterIdSet);
-
-        // 根据gifId获取gif
-        List<Gif> gifList = gifService.listByIds(idSet);
-
-        // 将gifList转换为GifDTO列表
-        List<GifDTO> resList = new ArrayList<>();
-        for (Gif gif : gifList) {
-            GifDTO gifDTO = gifParamMapper.toGifDTO(gif);
-            resList.add(gifDTO);
+            // 7.转换为VO并合并缓存中的点赞数量
+            List<GifVO> resList = new ArrayList<>();
+            for (Gif gif : gifs) {
+                resList.add(gifParamMapper.toGifVO(gif));
+            }
+            batchMergeRealTimeLikeCount(resList);
+            
+            return resList;
+        } catch (Exception e) {
+            log.error("获取用户{}分类{}喜欢列表失败: {}", userId, categoryId, e.getMessage(), e);
+            return new ArrayList<>();
         }
+    }
+    
+    /**
+     * 获取用户不喜欢的gif ID集合（包含当前缓存和备份缓存）
+     * @param userId 用户ID
+     * @return 不喜欢的gif ID集合
+     */
+    private Set<String> getDislikedGifIds(Long userId) {
+        try {
+            String userDislikeKey = USER_DISLIKE_KEY + userId;
+
+            if (!cacheService.hasKey(userDislikeKey)) return new HashSet<>();
+
+            // 获取当前不喜欢集合
+            Set<String> currentDisliked = cacheService.getStringSetSafely(userDislikeKey, false);
+            Set<String> result = new HashSet<>(currentDisliked);
+            
+            // 获取备份不喜欢集合
+            Set<String> oldDisliked = cacheService.getStringSetSafely(userDislikeKey + ":old", false);
+            result.addAll(oldDisliked);
+            
+            return result;            
+        } catch (Exception e) {
+            log.error("获取用户{}不喜欢列表失败: {}", userId, e.getMessage(), e);
+            return new HashSet<>();
+        }
+    }
+
+    /**
+     * 获取用户指定分类的gif ID集合（包含当前缓存和备份缓存）
+     * @param userId 用户ID
+     * @return gif ID集合
+     */
+    private Map<String, Long> getCacheGifIds(Long userId) {
+        String userLikeCategoryKey = USER_LIKE_CATEGORY_KEY + userId;
+        if (!cacheService.hasKey(userLikeCategoryKey)) return new HashMap<>();
+        Map<String, Long> result = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey, false);
+        // oldKey
+        Map<String, Long> oldResult = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey + ":old", false);
+        result.putAll(oldResult);
+        return result;
+    }
+
+    /**
+     * 从数据库中获取用户指定分类的gif ID集合（排除不喜欢的gif）
+     * @param userId 用户ID
+     * @param categoryId 分类ID
+     * @param dislikedGifIds 用户不喜欢的gif ID集合
+     * @return gif ID集合
+     */
+    private Set<Long> getDbGifIdsByCategory(Long userId, Long categoryId, Set<String> dislikedGifIds) {
+        try {
+            LambdaQueryWrapper<UserLike> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(UserLike::getUserId, userId)
+                       .eq(UserLike::getUserLikeCategoryId, categoryId)
+                       .select(UserLike::getGifId); // 只查询gif ID字段
+            
+            // 如果有不喜欢的gif ID，排除它们
+            if (!dislikedGifIds.isEmpty()) {
+                // 将String类型的gif ID转换为Long类型
+                Set<Long> dislikedGifIdsLong = dislikedGifIds.stream()
+                        .map(Long::parseLong)
+                        .collect(Collectors.toSet());
+                
+                if (!dislikedGifIdsLong.isEmpty()) {
+                    queryWrapper.notIn(UserLike::getGifId, dislikedGifIdsLong);
+                }
+            }
+            
+            List<UserLike> userLikes = userLikeService.list(queryWrapper);
+
+            return userLikes.stream()
+                    .map(UserLike::getGifId)
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            log.error("从数据库获取用户{}分类{}喜欢列表失败: {}", userId, categoryId, e.getMessage(), e);
+            return new HashSet<>();
+        }
+    }
+    
+    /**
+     * 根据ID列表查询状态正常的gif详情（一次数据库请求）
+     * @param gifIds gif ID列表
+     * @return gif列表
+     */
+    private List<Gif> getGifsByIdsWithStatus(List<Long> gifIds) {
+        try {
+            if (gifIds.isEmpty()) return new ArrayList<>();
+            LambdaQueryWrapper<Gif> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.in(Gif::getId, gifIds).eq(Gif::getStatus, 1); // 只查询状态正常的gif
+            return gifService.list(queryWrapper);
+        } catch (Exception e) {
+            log.error("根据ID列表查询gif详情失败: {}", e.getMessage(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 判断用户是否喜欢指定的GIF文件
+     * 
+     * <p>该方法采用双重缓存机制来保证数据一致性和查询性能：</p>
+     * <ul>
+     *   <li><strong>userLikeCategoryKey</strong>：用户喜欢分类缓存</li>
+     *   <li><strong>userDislikeKey</strong>：用户不喜欢缓存</li>
+     *   <li><strong>userLikeCategoryKey:old</strong>：用户喜欢分类缓存旧数据</li>
+     *   <li><strong>userDislikeKey:old</strong>：用户不喜欢缓存旧数据</li>
+     * </ul>
+     * 
+     * <h4>查询逻辑：</h4>
+     * <ol>
+     *   <li>优先查询userLikeCategoryKey 和 userDislikeKey 缓存，如果有数据则直接返回</li>
+     *   <li>如果userLikeCategoryKey 和 userDislikeKey 缓存都为空，则查询 userLikeCategoryKey:old 和 userDislikeKey:old 缓存，如果有数据则直接返回</li>
+     *   <li>如果userLikeCategoryKey:old 和 userDislikeKey:old 缓存都为空，则查询数据库</li>
+     * </ol>
+     * 
+     * <h4>边界情况处理：</h4>
+     * <ul>
+     *   <li><strong>用户刚点击喜欢：</strong>userLikeCategoryKey 和 userDislikeKey 缓存有数据但数据库可能尚未同步</li>
+     *   <li><strong>缓存清理期间：</strong>userLikeCategoryKey 和 userDislikeKey 缓存被清空但数据库正在写入，此时查询 userLikeCategoryKey:old 和 userDislikeKey:old 缓存保证数据连续性</li>
+     *   <li><strong>用户连续操作：</strong>userLikeCategoryKey 和 userDislikeKey 缓存始终保持最新状态，确保实时响应</li>
+     * </ul>
+     *
+     * @param fileId GIF文件的唯一标识符
+     * @param userId 用户的唯一标识符
+     * @return {@code true} 用户喜欢该GIF，{@code false} 用户不喜欢该GIF
+     * @see #updateLikeCount(String, Long, Long, Boolean) 更新用户点赞状态方法
+     */
+    @Override
+    public boolean isLikeThis(String fileId, Long userId) {
+        // 喜欢hashKey
+        String userLikeCategoryKey = USER_LIKE_CATEGORY_KEY + userId;
+        // 不喜欢setKey
+        String userDislikeKey = USER_DISLIKE_KEY + userId;
+
+        if (!cacheService.hasKey(userLikeCategoryKey) && !cacheService.hasKey(userDislikeKey)) {
+            // 如果没有 userLikeCategoryKey 或者 userDislikeKey 直接查数据库
+            return userLikeService.getOne(
+                    new LambdaQueryWrapper<UserLike>()
+                            .eq(UserLike::getUserId, userId)
+                            .eq(UserLike::getGifId, fileId)
+            ) != null;
+        }
+
+        Map<String, Long> likeCategoryHash = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey, false);
+        Set<String> disLikeSet = cacheService.getStringSetSafely(userDislikeKey, false);
+
+        if (likeCategoryHash.containsKey(fileId)) {
+            return true;
+        } else if (disLikeSet.contains(fileId)) {
+            return false;
+        } else {
+            // 查询oldKey
+            Map<String, Long> oldLikeCategoryHash = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey + ":old", false);
+            Set<String> oldDisLikeSet = cacheService.getStringSetSafely(userDislikeKey + ":old", false);
+
+            if (oldLikeCategoryHash.containsKey(fileId)) {
+                return true;
+            } else if (oldDisLikeSet.contains(fileId)) {
+                return false;
+            } else {
+                return userLikeService.getOne(
+                    new LambdaQueryWrapper<UserLike>()
+                            .eq(UserLike::getUserId, userId)
+                            .eq(UserLike::getGifId, fileId)
+                ) != null;
+            }
+        }
+    }
+
+    /**
+     * 随机获取GIF列表
+     * 原理：随机获取一条数据然后从这一条开始分页查询
+     * @param lastId 最后一条数据的ID
+     * 
+     * @return 随机GIF列表
+     * @see #getRandomGif() 获取随机数据方法
+     */
+    @Override
+    public List<GifVO> getRandomGifs(String lastId) {
+        Long rId;
+        // 如果lastId为空，则随机获取一条数据
+        if (lastId == null || lastId.isEmpty()) {
+            // 随机获取一条数据
+            Gif gif = gifService.getRandomOne();
+            rId = gif.getId();
+        } else rId = Long.parseLong(lastId);
+
+        if (rId == null) throw new RuntimeException("随机Id为空");
+        
+        // 从这一条开始查询10个 直接limit 10
+        List<Gif> gifList = gifService.list(new LambdaQueryWrapper<Gif>()
+                .eq(Gif::getStatus, 1)
+                .gt(Gif::getId, rId)
+                .orderByAsc(Gif::getId)
+                .last("limit 10"));
+
+        // 如果数量小于10 也就是说取的是后10条数据，那么差几条就从库中前几条补
+        if (gifList.size() < 10) {
+            // 从数据库中获取前10 - gifList.size() 条数据
+            List<Gif> gifList2 = gifService.list(new LambdaQueryWrapper<Gif>()
+                    .eq(Gif::getStatus, 1)
+                    .orderByAsc(Gif::getId)
+                    .last("limit " + (10 - gifList.size())));
+            gifList.addAll(gifList2);
+        }
+
+        // 转换为VO
+        List<GifVO> resList = new ArrayList<>();
+        for (Gif gif : gifList) {
+            resList.add(gifParamMapper.toGifVO(gif));
+        }
+        
+        // 批量合并缓存中的点赞数量
+        batchMergeRealTimeLikeCount(resList);
+        
         return resList;
     }
 
+    /**
+     * 随机获取一条数据
+     * @return 随机GIF
+     */
+    @Override
+    public GifVO getRandomGif() {
+        // 随机获取一条数据
+        GifVO gifVO = gifParamMapper.toGifVO(gifService.getRandomOne());
+        // 合并缓存中的点赞增量
+        mergeRealTimeLikeCount(gifVO);
+        return gifVO;
+    }
+
+    /**
+     * 合并实时点赞数量
+     * 将数据库中的点赞数量与缓存中的增量合并，得到实时准确的点赞数量
+     * 
+     * @param gifVO GIF视图对象
+     */
+    private void mergeRealTimeLikeCount(GifVO gifVO) {
+        try {
+            // 从缓存获取当前文件的点赞增量
+            String likeCountKey = LIKE_COUNT_KEY + gifVO.getId();
+            Long cachedIncrement = cacheService.getNumber(likeCountKey);
+            
+            if (cachedIncrement != null && cachedIncrement != 0) {
+                // 将数据库中的点赞数与缓存增量相加
+                long currentLikeCount = gifVO.getLikeCount() != null ? gifVO.getLikeCount() : 0L;            
+                // 更新GifVO中的点赞数量
+                gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement));
+            }
+        } catch (Exception e) {
+            // 合并失败不影响主流程，只记录日志
+            log.warn("合并实时点赞数量失败: fileId={}, 错误: {}", gifVO.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 批量合并实时点赞数量（批量版本）
+     * 通过一次Redis调用获取多个文件的点赞增量，显著提高性能
+     * 
+     * @param gifVOList GIF视图对象列表
+     */
+    private void batchMergeRealTimeLikeCount(List<GifVO> gifVOList) {
+        if (gifVOList.isEmpty()) {
+            return;
+        }
+        
+        try {
+            // 构建所有需要查询的Redis键
+            List<String> likeCountKeys = gifVOList.stream()
+                    .map(gif -> LIKE_COUNT_KEY + gif.getId())
+                    .toList();
+            
+            // 批量获取所有点赞增量（一次Redis调用获取所有数据，按顺序返回）
+            List<Long> cachedIncrements = cacheService.batchGetNumbers(likeCountKeys);
+            
+            // 遍历每个cachedIncrements，合并缓存中的点赞增量
+            for (int i = 0; i < cachedIncrements.size(); i++) {
+                try {
+                    Long cachedIncrement = cachedIncrements.get(i);
+                    if (cachedIncrement != 0) {
+                        GifVO gifVO = gifVOList.get(i);
+                        // 将数据库中的点赞数与缓存增量相加
+                        long currentLikeCount = gifVO.getLikeCount() != null ? gifVO.getLikeCount() : 0L;
+                        gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement));
+                    }
+                } catch (Exception e) {
+                    log.warn("批量合并实时点赞数量失败: fileId={}, 错误: {}", likeCountKeys.get(i), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("批量合并实时点赞数量失败: {}", e.getMessage());
+        }
+    }
 }
-                
