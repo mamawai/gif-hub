@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: gh-gif
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+  datasource:
+    url: jdbc:mysql://localhost:3306/gif_hub?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:./mappers/**/*.xml
+server:
+  port: 8080
+
+# cloudflare r2
+cloudflare:
+  aws:
+    s3:
+      # 替换为实际accountID
+      endpoint:
+      # 替换为实际存储桶名
+      bucket-name: gif-hub
+      # 替换为自定义域名
+      cdn-domain: mynnmy.top
+      # 自动识别区域
+      region: auto
+      credentials:
+        # 替换为API访问密钥
+        access-key:
+        # 替换为API秘密密钥
+        secret-key:
+
+# GIF压缩配置
+gif:
+  compress:
+    quality: 0.7  # 压缩质量 (0.1-1.0)
+    max-width: 800  # 最大宽度
+    max-height: 600  # 最大高度
+  thumbnail:
+    width: 200  # 缩略图宽度
+    height: 200  # 缩略图高度
+  max-size: 10485760

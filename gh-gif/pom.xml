@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.mawai</groupId>
+        <artifactId>gifhub</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>gh-gif</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>gh-gif</name>
+    <description>gh-gif</description>
+    <packaging>jar</packaging>
+
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>com.mawai</groupId>
+            <artifactId>gh-common</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.mawai</groupId>
+            <artifactId>gh-mbPlus</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct-processor</artifactId>
+        </dependency>
+
+<!--        <dependency>-->
+<!--            <groupId>com.aliyun.oss</groupId>-->
+<!--            <artifactId>aliyun-sdk-oss</artifactId>-->
+<!--        </dependency>-->
+        <!-- 添加GIF压缩所需的依赖 -->
+<!--        <dependency>-->
+<!--            <groupId>com.madgag</groupId>-->
+<!--            <artifactId>animated-gif-lib</artifactId>-->
+<!--            <version>1.4</version>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>net.coobird</groupId>-->
+<!--            <artifactId>thumbnailator</artifactId>-->
+<!--            <version>0.4.19</version>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>org.bytedeco</groupId>-->
+<!--            <artifactId>javacv-platform</artifactId>-->
+<!--            <version>1.5.8</version>-->
+<!--        </dependency>-->
+
+        <!-- AWS SDK for S3 (兼容Cloudflare R2) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+
+        <!-- HTTP客户端用于底层请求 -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- 配置插件来支持 MapStruct 注解处理 -->
+<!--            很抽风了这次不配置也可以-->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.10.1</version>
+                <configuration>
+                    <!-- 配置 Java 版本 -->
+                    <source>21</source>
+                    <target>21</target>
+                    <compilerArgs>
+                        <arg>-Amapstruct.defaultComponentModel=spring</arg> <!-- 如果你使用 Spring -->
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>${org.mapstruct.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

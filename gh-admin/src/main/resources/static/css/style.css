@@ -1,0 +1,69 @@
+body {
+    font-size: .875rem;
+}
+
+.sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    padding: 48px 0 0;
+    box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
+}
+
+.sidebar-header {
+    padding: 0.875rem 1rem;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.sidebar .nav-link {
+    font-weight: 500;
+    color: #333;
+}
+
+.sidebar .nav-link.active {
+    color: #2470dc;
+}
+
+.sidebar-sticky {
+    position: relative;
+    top: 0;
+    height: calc(100vh - 48px);
+    padding-top: .5rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.gif-preview-thumbnail {
+    max-width: 100px;
+    max-height: 100px;
+    cursor: pointer;
+}
+
+#gif-preview {
+    max-height: 300px;
+}
+
+#delete-all-btn {
+    margin-left: 1rem;
+    width: 80%;
+}
+
+.nav-item button {
+    transition: all 0.3s ease;
+}
+
+.nav-item button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* 响应式调整 */
+@media (max-width: 767.98px) {
+    .sidebar {
+        position: static;
+        height: auto;
+    }
+} 

@@ -1,0 +1,69 @@
+# Sa-Token配置
+sa-token:
+  # token名称 (同时也是cookie名称)
+  token-name: satoken
+  # token有效期，单位s 默认30天, 这里设置为7天
+  timeout: 604800
+  # token临时有效期 (指定时间内无操作就过期) 单位: 秒
+  active-timeout: 1800
+  # 是否允许同一账号并发登录 (为true时允许一个账号多地同时登录)
+  is-concurrent: false
+  # 在多人登录同一账号时，是否共用一个token (为true时所有登录共用一个token, 为false时每次登录新建一个token)
+  is-share: false
+  # token风格
+  token-style: uuid
+  # 是否输出操作日志
+  is-log: true
+  # 是否从cookie中读取token
+  is-read-cookie: false
+  # 是否从请求头中读取token
+  is-read-header: true
+#
+#spring:
+#  # 邮件配置
+#  mail:
+#    host: smtp.example.com
+#    port: 587
+#    username: your-email@example.com
+#    password: your-email-password
+#    properties:
+#      mail:
+#        smtp:
+#          auth: true
+#          starttls:
+#            enable: true
+
+spring:
+  application:
+    name: gh-weixin
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+  datasource:
+    url: jdbc:mysql://localhost:3306/gif_hub?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: root
+    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:./mappers/**/*.xml
+
+# 端口
+server:
+  port: 8083
+
+
+# 邮件配置
+resend:
+  api-key: ''
+  from-email: 'noreply@mynnmy.top'
+
+# 微信配置
+wechat:
+  appId: ''
+  secret: ''
+  grantType: 'authorization_code'
+  loginUrl: 'https://api.weixin.qq.com/sns/jscode2session'
