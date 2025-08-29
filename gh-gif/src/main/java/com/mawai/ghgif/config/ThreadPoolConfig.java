@@ -10,6 +10,7 @@ import org.springframework.lang.NonNull;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -48,32 +49,32 @@ public class ThreadPoolConfig {
     }
 
     /**
-     * 文件上传专用线程池
+     * 文件上传专用虚拟线程执行器
+     * 使用虚拟线程处理文件上传到Cloudflare R2的IO密集型操作
+     * 优势：支持更高并发、更低内存占用、无需复杂的线程池配置
      */
     @Bean("fileUploadExecutor")
     public Executor fileUploadExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数
-        executor.setCorePoolSize(10);
-        // 最大线程数
-        executor.setMaxPoolSize(20);
-        // 队列容量
-        executor.setQueueCapacity(200);
-        // 线程名前缀
-        executor.setThreadNamePrefix("file-upload-");
-        // 线程空闲时间
-        executor.setKeepAliveSeconds(60);
-        // 拒绝策略：由调用线程处理
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        // 等待所有任务结束后再关闭线程池
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        // 等待时间（默认为0，此时立即停止）
-        executor.setAwaitTerminationSeconds(60);
-        // 设置任务装饰器，传递登录信息
-        executor.setTaskDecorator(new CustomTaskDecorator());
-        // 初始化
-        executor.initialize();
-        return executor;
+        // 创建虚拟线程执行器，每个任务都会创建一个新的虚拟线程
+        return new VirtualThreadTaskExecutor();
+    }
+
+    /**
+     * 虚拟线程任务执行器，支持TaskDecorator
+     * 用于在虚拟线程中传递登录信息等上下文
+     */
+    public static class VirtualThreadTaskExecutor implements Executor {
+        private final TaskDecorator taskDecorator = new CustomTaskDecorator();
+
+        @Override
+        public void execute(@NonNull Runnable command) {
+            // 应用任务装饰器，传递登录信息
+            Runnable decoratedTask = taskDecorator.decorate(command);
+            // 在虚拟线程中执行任务
+            Thread.ofVirtual()
+                .name("virtual-file-upload-", 0)
+                .start(decoratedTask);
+        }
     }
 
     /**
@@ -148,20 +149,13 @@ public class ThreadPoolConfig {
     }
 
     /**
-     * 邮件发送专用线程池（来自weixin模块）
+     * 邮件发送专用虚拟线程执行器
+     * 使用虚拟线程处理SMTP邮件发送的IO密集型操作
+     * 优势：每个邮件发送请求都能立即获得"线程"，降低发送延迟
      */
     @Bean("emailSendExecutor")
     public Executor emailSendExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("email-send-");
-        executor.setKeepAliveSeconds(60);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
-        executor.initialize();
-        return executor;
+        // 邮件发送不需要传递登录信息，直接使用虚拟线程执行器
+        return Executors.newVirtualThreadPerTaskExecutor();
     }
 } 

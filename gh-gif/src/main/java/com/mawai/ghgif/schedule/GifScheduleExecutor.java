@@ -19,6 +19,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.annotation.PreDestroy;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
@@ -28,8 +29,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Gif定时任务执行器
@@ -46,15 +48,21 @@ public class GifScheduleExecutor {
 
     // 注入线程池
     private final Executor scheduledExecutor;
+    // 虚拟线程执行器，用于数据获取（IO密集型）
+    private final Executor virtualDataFetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final UserLikeService userLikeService;
     private final R2FileUtils r2FileUtils;
 
     private static final int SYNC_INTERVAL = 1; // 同步间隔
     private static final int BATCH_SIZE = 100; // 批量处理大小
     private static final int USER_BATCH_SIZE = 10;
+    private static final int MAX_CONCURRENT_DATA_FETCH = 20; // 最大并发数据获取线程数
+    private static final int DB_WORKER_THREADS = 3; // 数据库操作工作线程数
+    private static final int QUEUE_HIGH_WATER_MARK = 2000; // 队列高水位标记，用于背压控制
+    private static final int MAX_BACKPRESSURE_WAIT_SECONDS = 20; // 背压等待最大时间（秒）
+
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
-
     private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:";
     private static final String USER_DISLIKE_KEY = "user:dislike:";
 
@@ -67,13 +75,13 @@ public class GifScheduleExecutor {
      * <ul>
      *   <li>同步GIF下载次数到数据库（{@link #syncDownloadCountToDatabase()}）</li>
      *   <li>同步GIF点赞计数到数据库（{@link #syncLikeCountsToDatabase()}）</li>
-     *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabase()}）</li>
+     *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabaseConcurrent()}）</li>
      * </ul>
      * 
      * <p>任务执行过程记录完整日志，包括开始、完成和异常信息。</p>
      * 
      * @see #syncLikeCountsToDatabase() 点赞数据同步实现
-     * @see #syncUserLikesToDatabase() 用户喜欢记录同步实现
+     * @see #syncUserLikesToDatabaseConcurrent() () 用户喜欢记录同步实现
      * @see CacheService#getKeysWithPattern(String) 获取符合模式的Redis键
      */
     @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 转换为毫秒
@@ -95,7 +103,7 @@ public class GifScheduleExecutor {
             });
             
         CompletableFuture
-            .runAsync(this::syncUserLikesToDatabase, scheduledExecutor)
+            .runAsync(this::syncUserLikesToDatabaseConcurrent, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步用户喜欢记录失败: {}", e.getMessage(), e);
                 return null;
@@ -250,26 +258,52 @@ public class GifScheduleExecutor {
             log.error("同步GIF点赞数据失败: {}", e.getMessage(), e);
         }
     }
-    
+
     /**
-     * 同步用户喜欢记录到数据库
+     * 使用虚拟线程优化的用户喜欢记录同步到数据库
      *
-     * <p>从Redis获取所有用户的喜欢/不喜欢记录，并将这些增量数据更新到数据库中。
-     * 处理流程包括：</p>
+     * <p>该方法采用生产者-消费者模式，实现高效的用户喜欢记录同步。从Redis缓存中获取用户的点赞和取消点赞数据，
+     * 并将这些数据批量同步到MySQL数据库中。</p>
      *
+     * <h3>架构设计</h3>
+     * <ul>
+     *   <li><strong>生产者</strong>：使用虚拟线程并发从Redis获取用户数据，充分利用虚拟线程在IO密集型操作中的优势</li>
+     *   <li><strong>消费者</strong>：使用固定数量的平台线程处理数据库操作，避免数据库连接池竞争和过载</li>
+     *   <li><strong>队列</strong>：使用无界{@link LinkedBlockingQueue}解耦生产和消费，实现流水线处理</li>
+     * </ul>
+     *
+     * <h3>处理流程</h3>
      * <ol>
-     *   <li>获取所有有like/dislike数据的用户ID</li>
-     *   <li>对每个用户获取其喜欢和不喜欢的GIF ID集合</li>
-     *   <li>批量创建新的喜欢记录</li>
-     *   <li>批量删除不喜欢的记录</li>
-     *   <li>每处理{@link #USER_BATCH_SIZE}个有效用户执行一次批量数据库操作</li>
+     *   <li>获取所有有点赞/取消点赞数据的用户ID列表</li>
+     *   <li>启动{@value #DB_WORKER_THREADS}个数据库消费者线程</li>
+     *   <li>使用虚拟线程批量并发获取用户数据，每批最多{@value #MAX_CONCURRENT_DATA_FETCH}个并发任务</li>
+     *   <li>生产者将获取到的数据放入队列，消费者从队列取数据并批量处理数据库操作</li>
+     *   <li>生产者完成后设置标志位，消费者检测到标志位且队列为空时优雅退出</li>
      * </ol>
      *
-     * <p>操作完成后清空Redis中的相关数据，实现增量同步。</p>
+     * <h3>性能优化</h3>
+     * <ul>
+     *   <li><strong>并发控制</strong>：限制Redis并发数为{@value #MAX_CONCURRENT_DATA_FETCH}，避免内存太大</li>
+     *   <li><strong>批量处理</strong>：消费者每处理{@value #USER_BATCH_SIZE}个用户数据执行一次数据库批量操作</li>
+     *   <li><strong>流水线处理</strong>：生产和消费并发进行，总处理时间约等于max(Redis获取时间, 数据库写入时间)</li>
+     *   <li><strong>内存控制</strong>：边生产边消费，避免内存中积累大量数据</li>
+     * </ul>
+     *
+     * <h3>异常处理</h3>
+     * <ul>
+     *   <li>单个用户数据获取失败不影响其他用户的处理</li>
+     *   <li>单个消费者线程异常不影响其他消费者线程</li>
+     *   <li>使用{@link AtomicBoolean}标志位确保消费者能够优雅退出</li>
+     * </ul>
+     *
+     * @see #fetchUserDataConcurrently(List, BlockingQueue) 生产者数据获取逻辑
+     * @see #startDatabaseConsumersWithFlag(BlockingQueue, AtomicInteger, AtomicBoolean) 消费者启动逻辑
+     * @see #executeBatchDatabaseOperations(List, List) 批量数据库操作
+     * @since 1.0
      */
-    private void syncUserLikesToDatabase() {
+    private void syncUserLikesToDatabaseConcurrent() {
         try {
-            // 获取所有有like/dislike数据的用户ID（使用新数据结构）
+            // 获取所有有like/dislike数据的用户ID
             Set<String> userIds = cacheService.getUserIdsWithLikeDataOptimized(USER_LIKE_CATEGORY_KEY, USER_DISLIKE_KEY);
 
             if (userIds.isEmpty()) {
@@ -277,112 +311,70 @@ public class GifScheduleExecutor {
                 return;
             }
 
-            log.info("发现{}个用户的喜欢和不喜欢记录需要同步", userIds.size());
-            // 批量处理，每批最多10个用户
-            List<UserLike> batchNewLikes = new ArrayList<>();
-            List<UserLike> batchDeleteLikes = new ArrayList<>();
-            int processedCount = 0; // 实际处理的用户数量
+            log.info("发现{}个用户的喜欢和不喜欢记录需要同步，使用生产者-消费者模式处理", userIds.size());
 
-            for (String userId : userIds) {
-                try {
-                    // 直接使用userId，构建key
-                    Long userIdLong = Long.parseLong(userId);
-                    String likeHashKey = USER_LIKE_CATEGORY_KEY + userId;
-                    String dislikeSetKey = USER_DISLIKE_KEY + userId;
+            // 创建无界队列用于传递处理好的数据，避免数据丢失
+            BlockingQueue<UserLikeData> dataQueue = new LinkedBlockingQueue<>();
+            AtomicInteger processedUsers = new AtomicInteger(0);
+            AtomicBoolean producerFinished = new AtomicBoolean(false);
 
-                    // 获取点赞Hash（安全获取，自动创建oldKey备份）
-                    Map<String, Long> likedGifMapping = cacheService.getLikeCategoryIdsSafely(likeHashKey, true);
-                    // 获取不喜欢Set（安全获取，自动创建oldKey备份）
-                    Set<String> dislikeGifIds = cacheService.getStringSetSafely(dislikeSetKey, true);
+            // 启动固定数量的数据库消费者线程
+            List<CompletableFuture<Void>> dbConsumerFutures = startDatabaseConsumersWithFlag(dataQueue, processedUsers, producerFinished);
 
-                    // 如果两个集合都为空，则跳过（不计入processedCount）
-                    if (CollectionUtil.isEmpty(likedGifMapping) && CollectionUtil.isEmpty(dislikeGifIds)) {
-                        log.info("用户{}没有需要同步的数据，跳过", userId);
-                        continue;
-                    }
+            // 使用虚拟线程并发获取用户数据（生产者）
+            List<String> userIdList = new ArrayList<>(userIds);
+            List<CompletableFuture<Void>> dataFetchFutures = new ArrayList<>();
 
-                    // 处理点赞记录（Hash中已包含分类信息）
-                    for (Map.Entry<String, Long> entry : likedGifMapping.entrySet()) {
-                        try {
-                            String gifId = entry.getKey();
-                            Long categoryId = entry.getValue();
-                            
-                            UserLike userLike = new UserLike()
-                                .setUserId(userIdLong)
-                                .setGifId(Long.parseLong(gifId))
-                                .setUserLikeCategoryId(categoryId);
-                            
-                            batchNewLikes.add(userLike);
-                        } catch (Exception e) {
-                            log.error("处理用户{}的点赞记录失败: gifId={}, 错误: {}", userId, entry.getKey(), e.getMessage());
-                        }
-                    }
-                    
-                    // 处理取消点赞记录
-                    for (String gifId : dislikeGifIds) {
-                        try {
-                            batchDeleteLikes.add(new UserLike().setUserId(userIdLong).setGifId(Long.parseLong(gifId)));
-                        } catch (Exception e) {
-                            log.error("处理用户{}的取消点赞记录失败: gifId={}, 错误: {}", userId, gifId, e.getMessage());
-                        }
-                    }
+            // 控制并发数，避免Redis压力过大
+            for (int i = 0; i < userIdList.size(); i += MAX_CONCURRENT_DATA_FETCH) {
+                int endIndex = Math.min(i + MAX_CONCURRENT_DATA_FETCH, userIdList.size());
+                List<String> batch = userIdList.subList(i, endIndex);
 
-                    processedCount++; // 只有成功处理的用户才计数
+                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                    fetchUserDataConcurrently(batch, dataQueue);
+                }, virtualDataFetchExecutor);
 
-                    // 每10个有效用户保存一次
-                    if (processedCount % USER_BATCH_SIZE == 0) {
-                        try {
-                            // 保存或更新（处理分类变更情况）
-                            if (!batchNewLikes.isEmpty()) {
-                                userLikeService.insertOrUpdateBatchByUniqueKey(batchNewLikes);
-                                log.info("批量保存/更新{}条喜欢记录", batchNewLikes.size());
-                                batchNewLikes.clear();
-                            }
-                            // 删除 - 遍历删除
-                            if (!batchDeleteLikes.isEmpty()) {
-                                for (UserLike userLike : batchDeleteLikes) {
-                                    LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
-                                    deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
-                                                .eq(UserLike::getGifId, userLike.getGifId());
-                                    userLikeService.remove(deleteWrapper);
-                                }
-                                log.info("批量删除{}条不喜欢记录", batchDeleteLikes.size());
-                                batchDeleteLikes.clear();
-                            }
-                        } catch (Exception e) {
-                            log.error("批量处理数据库操作失败: {}", e.getMessage(), e);
-                            // 清空批次数据，避免重复处理
-                            batchNewLikes.clear();
-                            batchDeleteLikes.clear();
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("处理用户喜欢记录失败: userId={}, 错误: {}", userId, e.getMessage());
-                }
-            }
-            
-            // 处理剩余记录
-            try {
-                if (!batchNewLikes.isEmpty()) {
-                    userLikeService.insertOrUpdateBatchByUniqueKey(batchNewLikes);
-                    log.info("批量保存/更新剩余的{}条喜欢记录", batchNewLikes.size());
-                }
-                if (!batchDeleteLikes.isEmpty()) {
-                    for (UserLike userLike : batchDeleteLikes) {
-                        LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
-                        deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
-                                    .eq(UserLike::getGifId, userLike.getGifId());
-                        userLikeService.remove(deleteWrapper);
-                    }
-                    log.info("批量删除剩余的{}条不喜欢记录", batchDeleteLikes.size());
-                }
-            } catch (Exception e) {
-                log.error("处理剩余记录失败: {}", e.getMessage(), e);
+                dataFetchFutures.add(future);
             }
 
-            log.info("用户喜欢记录同步完成，共处理{}个用户", processedCount);
+            // 等待所有数据获取完成
+            CompletableFuture.allOf(dataFetchFutures.toArray(new CompletableFuture[0])).join();
+
+            // 标记生产者完成
+            producerFinished.set(true);
+            log.info("所有生产者完成，等待消费者处理完剩余数据");
+
+            // 等待所有数据库操作完成
+            CompletableFuture.allOf(dbConsumerFutures.toArray(new CompletableFuture[0])).join();
+
+            log.info("生产者-消费者模式用户喜欢记录同步完成，共处理{}个用户", processedUsers.get());
         } catch (Exception e) {
-            log.error("同步用户喜欢记录失败: {}", e.getMessage(), e);
+            log.error("生产者-消费者模式同步用户喜欢记录失败: {}", e.getMessage(), e);
+        }
+    }
+
+
+    /**
+     * 执行批量数据库操作
+     */
+    private void executeBatchDatabaseOperations(List<UserLike> batchNewLikes, List<UserLike> batchDeleteLikes) {
+        try {
+            if (!batchNewLikes.isEmpty()) {
+                userLikeService.insertOrUpdateBatchByUniqueKey(batchNewLikes);
+                log.info("批量保存/更新{}条喜欢记录", batchNewLikes.size());
+            }
+
+            if (!batchDeleteLikes.isEmpty()) {
+                for (UserLike userLike : batchDeleteLikes) {
+                    LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
+                    deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
+                                .eq(UserLike::getGifId, userLike.getGifId());
+                    userLikeService.remove(deleteWrapper);
+                }
+                log.info("批量删除{}条不喜欢记录", batchDeleteLikes.size());
+            }
+        } catch (Exception e) {
+            log.error("批量数据库操作失败", e);
         }
     }
 
@@ -519,5 +511,219 @@ public class GifScheduleExecutor {
         // 使用固定前缀截取，效率更高 10000次 0.5ms 而 split再取parts[3] 6ms
         // 这里写死固定长度截取 -- https://mynnmy.top/
         return url.substring(19);
+    }
+
+    /**
+     * 用户喜欢数据传输对象
+     */
+    private record UserLikeData(
+            String userId,
+            List<UserLike> newLikes,
+            List<UserLike> deleteLikes) {
+
+    }
+
+    /**
+     * 启动固定数量的数据库消费者线程（使用标志位控制）
+     */
+    private List<CompletableFuture<Void>> startDatabaseConsumersWithFlag(BlockingQueue<UserLikeData> dataQueue,
+                                                                        AtomicInteger processedUsers,
+                                                                        AtomicBoolean producerFinished) {
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+        for (int i = 0; i < DB_WORKER_THREADS; i++) {
+            final int consumerId = i;
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                List<UserLike> batchNewLikes = new ArrayList<>();
+                List<UserLike> batchDeleteLikes = new ArrayList<>();
+                int localProcessedCount = 0;
+
+                log.info("数据库消费者线程{}启动", consumerId);
+
+                try {
+                    while (true) {
+                        UserLikeData data;
+
+                        // 尝试从队列获取数据，带超时
+                        try {
+                            data = dataQueue.poll(100, TimeUnit.MILLISECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+
+                        if (data != null) {
+                            // 收集数据到批次中
+                            if (data.newLikes() != null) {
+                                batchNewLikes.addAll(data.newLikes());
+                            }
+                            if (data.deleteLikes() != null) {
+                                batchDeleteLikes.addAll(data.deleteLikes());
+                            }
+
+                            localProcessedCount++;
+                            processedUsers.incrementAndGet();
+
+                            // 每处理USER_BATCH_SIZE个用户执行一次数据库操作
+                            if (localProcessedCount % USER_BATCH_SIZE == 0) {
+                                executeBatchDatabaseOperations(batchNewLikes, batchDeleteLikes);
+                                batchNewLikes.clear();
+                                batchDeleteLikes.clear();
+                            }
+                        } else {
+                            // 检查生产者是否完成 -- producerFinished.get(); 并且队列为空
+                            if (producerFinished.get() && dataQueue.isEmpty()) {
+                                log.info("数据库消费者线程{}检测到生产者完成且队列为空，准备退出", consumerId);
+                                break;
+                            }
+                            // 否则继续等待
+                        }
+                    }
+
+                    // 处理剩余数据
+                    if (!batchNewLikes.isEmpty() || !batchDeleteLikes.isEmpty()) {
+                        executeBatchDatabaseOperations(batchNewLikes, batchDeleteLikes);
+                    }
+
+                    log.info("数据库消费者线程{}完成，处理了{}个用户", consumerId, localProcessedCount);
+
+                } catch (Exception e) {
+                    log.error("数据库消费者线程{}执行失败", consumerId, e);
+                }
+            });
+
+            futures.add(future);
+        }
+
+        return futures;
+    }
+
+    /**
+     * 等待队列有空间，带超时机制避免无限等待
+     * @param dataQueue 数据队列
+     * @param userId 用户ID（用于日志）
+     * @return true表示队列有空间，false表示超时放弃
+     */
+    @SuppressWarnings("BusyWait")
+    private boolean waitForQueueSpace(BlockingQueue<UserLikeData> dataQueue, String userId) {
+        long startTime = System.currentTimeMillis();
+        long maxWaitTime = MAX_BACKPRESSURE_WAIT_SECONDS * 1000L;
+
+        // 队列大小超过高水位标记，开始等待 -- 最多等待20秒
+        while (dataQueue.size() > QUEUE_HIGH_WATER_MARK) {
+            // 计算已等待时间
+            long elapsedTime = System.currentTimeMillis() - startTime;
+            if (elapsedTime > maxWaitTime) {
+                log.error("用户{}数据处理超时放弃，队列大小: {}, 等待时间: {}ms",
+                    userId, dataQueue.size(), elapsedTime);
+                return false;
+            }
+
+            try {
+                Thread.sleep(200); // 增加到200ms，减少检查频率
+                if (elapsedTime % 5000 == 0) { // 每5秒记录一次日志
+                    log.warn("用户{}等待队列空间，当前队列大小: {}, 已等待: {}ms",
+                        userId, dataQueue.size(), elapsedTime);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("用户{}等待队列空间被中断", userId);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 使用虚拟线程并发获取用户数据（带背压控制）
+     */
+    private void fetchUserDataConcurrently(List<String> userIds, BlockingQueue<UserLikeData> dataQueue) {
+        List<CompletableFuture<Void>> futures = userIds.stream()
+            .map(userId -> CompletableFuture.runAsync(() -> {
+                try {
+                    // 背压控制：如果队列过大，等待一段时间后放弃（20s）
+                    if (!waitForQueueSpace(dataQueue, userId)) {
+                        return; // 超时放弃处理这个用户
+                    }
+
+                    UserLikeData data = fetchSingleUserData(userId);
+                    if (data != null) {
+                        // 使用put()确保数据不会丢失，会阻塞直到有空间
+                        dataQueue.put(data);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("获取用户{}数据被中断", userId);
+                } catch (Exception e) {
+                    log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
+                }
+            }, virtualDataFetchExecutor))
+            .toList();
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    }
+
+    /**
+     * 获取单个用户的数据（纯IO操作，适合虚拟线程）
+     */
+    private UserLikeData fetchSingleUserData(String userId) {
+        try {
+            Long userIdLong = Long.parseLong(userId);
+            String likeHashKey = USER_LIKE_CATEGORY_KEY + userId;
+            String dislikeSetKey = USER_DISLIKE_KEY + userId;
+
+            Map<String, Long> likedGifMapping = cacheService.getLikeCategoryIdsSafely(likeHashKey, true);
+            Set<String> dislikeGifIds = cacheService.getStringSetSafely(dislikeSetKey, true);
+
+            // 没有点赞和取消点赞记录，直接返回null
+            if (CollectionUtil.isEmpty(likedGifMapping) && CollectionUtil.isEmpty(dislikeGifIds)) {
+                return null;
+            }
+
+            List<UserLike> newLikes = new ArrayList<>();
+            List<UserLike> deleteLikes = new ArrayList<>();
+
+            for (Map.Entry<String, Long> entry : likedGifMapping.entrySet()) {
+                try {
+                    String gifId = entry.getKey();
+                    Long categoryId = entry.getValue();
+
+                    UserLike userLike = new UserLike()
+                        .setUserId(userIdLong)
+                        .setGifId(Long.parseLong(gifId))
+                        .setUserLikeCategoryId(categoryId);
+
+                    newLikes.add(userLike);
+                } catch (Exception e) {
+                    log.error("处理用户{}的点赞记录失败: gifId={}", userId, entry.getKey(), e);
+                }
+            }
+
+            for (String gifId : dislikeGifIds) {
+                try {
+                    UserLike userLike = new UserLike()
+                            .setUserId(userIdLong)
+                            .setGifId(Long.parseLong(gifId));
+
+                    deleteLikes.add(userLike);
+                } catch (Exception e) {
+                    log.error("处理用户{}的取消点赞记录失败: gifId={}", userId, gifId, e);
+                }
+            }
+
+            return new UserLikeData(userId, newLikes, deleteLikes);
+
+        } catch (Exception e) {
+            log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 应用关闭时清理资源
+     */
+    @PreDestroy
+    public void cleanup() {
+        log.info("GifScheduleExecutor 清理完成");
     }
 }
