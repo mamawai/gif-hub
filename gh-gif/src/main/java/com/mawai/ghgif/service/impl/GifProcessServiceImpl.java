@@ -1,13 +1,16 @@
 package com.mawai.ghgif.service.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.ghcommon.utils.SpringUtils;
+import com.mawai.ghgif.amazonSQS.message.GifMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
 import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
+import com.mawai.ghgif.service.AmazonSQSService;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.util.R2FileUtils;
 import com.mawai.ghgif.vo.GifVO;
@@ -23,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -30,6 +34,7 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import jakarta.annotation.PostConstruct;
@@ -58,6 +63,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final GifParamMapper gifParamMapper;
     private final GifDeleteService gifDeleteService;
     private final CacheService cacheService;
+    private final AmazonSQSService amazonSQSService;
     // 注入线程池
     private final Executor fileUploadExecutor;
     
@@ -116,20 +122,6 @@ public class GifProcessServiceImpl implements GifProcessService {
 
     /**
      * @param userId 用户ID
-     * 增加GIF总数（+1）
-     */
-    private void incrementTotalGifCount(Long userId) {
-        try {
-            cacheService.increment(TOTAL_GIF_COUNT_KEY, 1);
-            cacheService.increment(TOTAL_GIF_COUNT_KEY + ":" + userId, 1, 60, TimeUnit.MINUTES);
-            log.info("GIF总数+1");
-        } catch (Exception e) {
-            log.error("增加GIF总数失败: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
-     * @param userId 用户ID
      * 减少GIF总数（-1）
      */
     private void decrementTotalGifCount(Long userId) {
@@ -152,6 +144,9 @@ public class GifProcessServiceImpl implements GifProcessService {
     private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:"; // 用户分类点赞缓存键
     private static final String USER_DISLIKE_KEY = "user:dislike:"; // 用户不喜欢缓存键
 
+    @Value("${aws.sqs.base-queue-url}")
+    private String SQS_QUEUE_URL;
+
     /**
      * 上传单个GIF文件
      * @param gifDTO GIF请求
@@ -161,13 +156,13 @@ public class GifProcessServiceImpl implements GifProcessService {
      */
     @Override
     @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试")
-    @Transactional(rollbackFor = Exception.class)
     public String r2uploadGif(GifDTO gifDTO) throws FileUploadException {
         // 获取请求内容
         MultipartFile file = gifDTO.getFile();
         Long userId = gifDTO.getUserId();
         String title = gifDTO.getTitle();
         String description = gifDTO.getDescription();
+        List<String> tags = gifDTO.getTags();
 
         // auto close stream
         try (InputStream inputStream = file.getInputStream()) {
@@ -190,35 +185,23 @@ public class GifProcessServiceImpl implements GifProcessService {
                     .build();
 
             // 上传文件 - 使用成员变量s3Client
-            s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, file.getSize()));
+            PutObjectResponse response = s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, file.getSize()));
+            log.info("文件上传成功: {}", response);
 
+            // 构建GIF消息
             String fileUrl = "https://" + R2FileUtils.CDN_DOMAIN + "/" + gifFileName;
-            try {
-                // 保存到数据库
-                Gif gif = new Gif();
-                gif.setUserId(userId);
-                gif.setTitle(StringUtils.hasText(title) ? title : file.getOriginalFilename());
-                gif.setDescription(description);
-                gif.setFileUrl(fileUrl);
-                gif.setFileSize((int) (file.getSize() / 1024));
-                gif.setStatus((byte)1); // 默认状态为正常 -- 后续会改为审核 0
-                gif.setViewCount(0);
-                gif.setLikeCount(0);
-                gif.setDownloadCount(0);
+            GifMessage gifMessage = GifMessage.builder()
+                    .userId(userId)
+                    .title(StringUtils.hasText(title) ? title : file.getOriginalFilename())
+                    .fileUrl(fileUrl)
+                    .description(description)
+                    .tags(tags)
+                    .fileSize((int) (file.getSize() / 1024))
+                    .build();
 
-                // 保存GIF信息
-                if (gifService.insertOne(gif)) log.info("保存GIF文件成功");
-                else throw new IOException("保存GIF文件失败返回false");
-                
-                //TODO 增加GIF总数 -- 暂时放在这里等后期整合到Audit模块中，因为图片审核通过是在这个模块中完成
-                incrementTotalGifCount(userId);
-
-                return fileUrl;
-            } catch (Exception e) {
-                //TODO重试save
-                log.error("保存GIF文件失败: 文件url{}", fileUrl);
-                throw new IOException("保存GIF文件失败" + e.getMessage(), e);
-            }
+            // 发送GIF消息到SQS
+            amazonSQSService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL);
+            return fileUrl;
         } catch (IOException | S3Exception e) {
             log.error("R2文件上传失败: {}", e.getMessage(), e);
             throw new FileUploadException("文件上传失败，请稍后再试");
@@ -383,7 +366,8 @@ public class GifProcessServiceImpl implements GifProcessService {
                         try {
                             // 发布事件
                             SpringUtils.context().publishEvent(
-                                    new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD)
+                                    // 每次清理2倍的数量确保都清理（因为handleProcessingFailure方法也会insert）也减少调用client的次数
+                                    new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD * 2)
                             );
                         } finally {
                             // 释放锁

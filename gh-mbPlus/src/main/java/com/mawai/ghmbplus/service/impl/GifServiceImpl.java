@@ -36,7 +36,7 @@ public class GifServiceImpl extends ServiceImpl<GifMapper, Gif> implements GifSe
                 return gif;
             } else {
                 // 如果为空，则返回随机值最小的那一行
-                log.error("无法从数据库中获取随机GIF，返回随机值最小的那一行");
+                log.warn("无法从数据库中获取随机GIF，返回随机值最小的那一行");
                 return baseMapper.selectMinRandom();
             }
         } catch (Exception e) {

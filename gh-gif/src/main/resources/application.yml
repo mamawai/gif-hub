@@ -22,6 +22,19 @@ mybatis-plus:
 server:
   port: 8080
 
+# AWS SQS 配置
+aws:
+  sqs:
+    # 基础队列URL
+    base-queue-url:
+    # 邮件队列URL
+    email-queue-url:
+    # AWS区域
+    region:
+  # AWS凭据
+  access-key-id:
+  secret-access-key:
+
 # cloudflare r2
 cloudflare:
   aws:

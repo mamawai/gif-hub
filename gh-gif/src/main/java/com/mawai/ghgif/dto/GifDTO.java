@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -24,4 +26,7 @@ public class GifDTO {
 
     @Schema(description = "gif描述", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private String description;
+
+    @Schema(description = "gif标签", requiredMode = Schema.RequiredMode.REQUIRED)
+    private List<String> tags;
 }

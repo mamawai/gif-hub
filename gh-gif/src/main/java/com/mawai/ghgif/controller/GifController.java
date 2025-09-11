@@ -97,7 +97,7 @@ public class GifController {
      * @return 更新结果
      */
     @Operation(summary = "更新GIF下载次数", description = "更新GIF下载次数")
-    @GetMapping("/record-download")
+    @GetMapping("/download")
     public ApiResponse<Boolean> recordDownload(@RequestParam("fileName") String fileName) {
         try {
             boolean result = gifProcessService.updateDownloadCount(fileName);

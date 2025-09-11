@@ -75,6 +75,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             // 生成6位随机数字验证码
             String verificationCode = generateVerificationCode();
             
+            // TODO 创建EmailMessage对象
             // 异步发送邮件
             sendEmailAsync(email, verificationCode);
             

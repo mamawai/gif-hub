@@ -7,8 +7,10 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.net.URI;
 
@@ -36,9 +38,11 @@ public class R2FileUtils implements InitializingBean {
                     // 创建S3Client实例，使用实例变量而非静态变量
                     s3Client = S3Client.builder()
                             .endpointOverride(URI.create(this.endpoint))
-                            .credentialsProvider(() -> AwsBasicCredentials.create(
-                                    this.accessKey,
-                                    this.secretKey
+                            .credentialsProvider(StaticCredentialsProvider.create(
+                                    AwsBasicCredentials.create(
+                                            this.accessKey,
+                                            this.secretKey
+                                    )
                             ))
                             .region(Region.of(this.region))
                             .build();
@@ -76,7 +80,7 @@ public class R2FileUtils implements InitializingBean {
     private String secretKey;
 
     @Override
-    public void afterPropertiesSet() throws Exception {
+    public void afterPropertiesSet() {
         END_POINT = this.endpoint;
         REGION = this.region;
         BUCKET_NAME = this.bucketName;

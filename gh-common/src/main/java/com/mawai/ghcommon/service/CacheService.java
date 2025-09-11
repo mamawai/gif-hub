@@ -89,6 +89,8 @@ public class CacheService {
         Object value = redisTemplate.opsForValue().get(key);
         if (value instanceof Number) {
             return (T) value;
+        } if (value ==  null) {
+            return null;
         }
         log.error("{} 的值不是数字类型", key);
         return null;
