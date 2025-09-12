@@ -1,9 +1,9 @@
--- Token Bucket Algorithm Implementation
--- KEYS[1]: rate limiter key
--- ARGV[1]: permits per second
--- ARGV[2]: capacity
--- ARGV[3]: current timestamp (milliseconds)
--- ARGV[4]: requested permits (default 1)
+-- 令牌桶算法实现
+-- KEYS[1]: 限流器键名
+-- ARGV[1]: 每秒允许的令牌数
+-- ARGV[2]: 桶容量
+-- ARGV[3]: 当前时间戳（毫秒）
+-- ARGV[4]: 请求的令牌数（默认为1）
 
 local key = KEYS[1]
 local permits_per_second = tonumber(ARGV[1])
@@ -11,47 +11,45 @@ local capacity = tonumber(ARGV[2])
 local now = tonumber(ARGV[3])
 local requested_permits = tonumber(ARGV[4]) or 1
 
--- Get current rate limit info from Redis hash
+-- 从Redis hash中获取当前限流信息
 local rate_limit_info = redis.call('HMGET', key, 'last_refill_time', 'tokens')
 local last_refill_time = tonumber(rate_limit_info[1])
 local tokens = tonumber(rate_limit_info[2])
 
--- Initialize bucket if this is the first request
+-- 如果是第一次请求，初始化
 if last_refill_time == nil or tokens == nil then
     last_refill_time = now
     tokens = capacity
 else
-    -- Calculate time elapsed since last refill (convert milliseconds to seconds)
-    local elapsed_time = (now - last_refill_time) / 1000.0
-    
-    -- Calculate new tokens to add (but don't exceed capacity)
-    local new_tokens = math.min(capacity, tokens + elapsed_time * permits_per_second)
-    tokens = new_tokens
-end
+    -- 处理可能的时钟偏差（时间倒退）
+    if now >= last_refill_time then
+        -- 计算自上次补充以来的时间（将毫秒转换为秒）
+        local elapsed_time = (now - last_refill_time) / 1000.0
+        
+        -- 计算要添加的新令牌数（但不超过容量）
+        tokens = math.min(capacity, tokens + elapsed_time * permits_per_second)
+    end
+    -- 如果 now < last_refill_time，保持当前令牌数
 
--- Check if we have enough tokens
+-- 检查是否有足够的令牌
 local allowed = tokens >= requested_permits
 
 if allowed then
-    -- Consume the requested tokens
+    -- 消费请求的令牌
     tokens = tokens - requested_permits
     
-    -- Update the bucket state in Redis
-    redis.call('HMSET', key, 'last_refill_time', now, 'tokens', tokens)
+    -- 更新Redis中的桶状态
+    redis.call('HSET', key, 'last_refill_time', now, 'tokens', tokens)
     
-    -- Set expiration time (2 times the time to fill the bucket)
-    local ttl = math.ceil(capacity / permits_per_second * 2)
+    -- 设置过期时间 向上取整等同于Math.ceil
+    local ttl = (capacity * 2 + permits_per_second - 1) / permits_per_second
     redis.call('EXPIRE', key, ttl)
     
-    return 1  -- Request allowed
+    return 1  -- 请求被允许
 else
-    -- Update last refill time but don't consume tokens
-    redis.call('HMSET', key, 'last_refill_time', now, 'tokens', tokens)
-    
-    -- Set expiration time
-    local ttl = math.ceil(capacity / permits_per_second * 2)
+    -- 请求被拒绝：不更新Redis
+    local ttl = (capacity * 2 + permits_per_second - 1) / permits_per_second
     redis.call('EXPIRE', key, ttl)
     
-    return 0  -- Request denied
+    return 0  -- 请求被拒绝
 end
-
