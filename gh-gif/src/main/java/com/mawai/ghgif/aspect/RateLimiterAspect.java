@@ -1,6 +1,7 @@
 package com.mawai.ghgif.aspect;
 
 import com.mawai.ghgif.annotation.RateLimiter;
+import com.mawai.ghgif.constant.RateLimiterType;
 import com.mawai.ghgif.config.ThreadPoolConfig;
 import com.mawai.ghgif.exception.RateLimitException;
 
@@ -57,8 +58,8 @@ public class RateLimiterAspect {
     @Around("@annotation(rateLimiter)")
     public Object around(ProceedingJoinPoint joinPoint, RateLimiter rateLimiter) throws Throwable {
         try {
-            // 获取登录id作为限流key
-            String key = getLoginId();
+            // 获取限流key
+            String key = getLimiterKey(rateLimiter.type());
             double permitsPerSecond = rateLimiter.permitsPerSecond();
             int bucketCapacity = rateLimiter.bucketCapacity();
             long now = System.currentTimeMillis(); // 使用毫秒时间戳
@@ -93,11 +94,12 @@ public class RateLimiterAspect {
     }
 
     /**
-     * 获取当前调用方法的用户id
+     * 获取限流key
+     * @param type 限流器类型
      *
-     * @return 登录id
+     * @return 限流器key
      */
-    private static String getLoginId() {
+    private static String getLimiterKey(RateLimiterType type) {
         String loginId = null;
         // 尝试从当前线程获取登录id
         try {
@@ -111,6 +113,6 @@ public class RateLimiterAspect {
             throw new RateLimitException("用户登录状态异常，无法进行限流");
         }
 
-        return "limiter:upload:" + loginId;
+        return "limiter:" + type.name() + ":" + loginId;
     }
 }

@@ -1,5 +1,7 @@
 package com.mawai.ghgif.amazonSQS.util;
 
+import com.mawai.ghgif.amazonSQS.MessageRouter;
+import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityRequest;
@@ -36,7 +38,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
 
     private final SqsClient sqsClient;
     private final String queueUrl;
-    private final Consumer<Message> messageConsumer;
+    private final MessageRouter messageRouter;
     private final Consumer<Exception> exceptionHandler;
     private final Runnable shutdownHook;
     
@@ -56,7 +58,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     private CustomSQSMessageConsumer(Builder builder) {
         this.sqsClient = Objects.requireNonNull(builder.sqsClient, "SqsClient不能为空");
         this.queueUrl = Objects.requireNonNull(builder.queueUrl, "队列URL不能为空");
-        this.messageConsumer = Objects.requireNonNull(builder.messageConsumer, "消息处理器不能为空");
+        this.messageRouter = Objects.requireNonNull(builder.messageRouter, "消息路由器不能为空");
         this.exceptionHandler = builder.exceptionHandler != null ? builder.exceptionHandler : this::defaultExceptionHandler;
         this.shutdownHook = builder.shutdownHook != null ? builder.shutdownHook : () -> {};
         
@@ -106,7 +108,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
                     List<Message> messages = sqsClient.receiveMessage(request).messages();
 
                     if (!messages.isEmpty()) {
-                        log.debug("轮询线程-{} 接收到 {} 条消息", threadId, messages.size());
+                        log.info("轮询线程-{} 接收到 {} 条消息", threadId, messages.size());
                         // 并行处理消息
                         messages.parallelStream().forEach(this::handleMessage);
                     } else {
@@ -131,7 +133,6 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
         }
     }
 
-
     /**
      * 处理单个消息
      */
@@ -148,8 +149,16 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
         }
 
         try {
-            // 处理消息
-            messageConsumer.accept(message);
+            // 使用路由器找到对应的处理器
+            MessageConsumer messageConsumer = messageRouter.routeMessage(message);
+            if (messageConsumer == null) {
+                // 没有找到处理器，忽略消息（等待SQS重试机制处理）
+                log.warn("未找到消息处理器，忽略消息: {}", message.messageId());
+                return;
+            }
+
+            // 使用找到的处理器处理消息
+            messageConsumer.handleMessage().accept(message);
             
             // 处理成功，删除消息
             deleteMessage(message);
@@ -267,7 +276,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     public static class Builder {
         private SqsClient sqsClient;
         private String queueUrl;
-        private Consumer<Message> messageConsumer;
+        private MessageRouter messageRouter;
         private Consumer<Exception> exceptionHandler;
         private Runnable shutdownHook;
         private int maxWaitTimeSeconds = 20;
@@ -284,8 +293,8 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
             return this;
         }
 
-        public Builder messageConsumer(Consumer<Message> messageConsumer) {
-            this.messageConsumer = messageConsumer;
+        public Builder messageRouter(MessageRouter messageRouter) {
+            this.messageRouter = messageRouter;
             return this;
         }
 

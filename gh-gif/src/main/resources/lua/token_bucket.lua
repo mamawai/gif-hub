@@ -30,6 +30,7 @@ else
         tokens = math.min(capacity, tokens + elapsed_time * permits_per_second)
     end
     -- 如果 now < last_refill_time，保持当前令牌数
+end
 
 -- 检查是否有足够的令牌
 local allowed = tokens >= requested_permits
@@ -41,14 +42,14 @@ if allowed then
     -- 更新Redis中的桶状态
     redis.call('HSET', key, 'last_refill_time', now, 'tokens', tokens)
     
-    -- 设置过期时间 向上取整等同于Math.ceil
-    local ttl = (capacity * 2 + permits_per_second - 1) / permits_per_second
+    -- 设置过期时间 向上取整
+    local ttl = math.ceil(capacity / permits_per_second * 2)
     redis.call('EXPIRE', key, ttl)
     
     return 1  -- 请求被允许
 else
     -- 请求被拒绝：不更新Redis
-    local ttl = (capacity * 2 + permits_per_second - 1) / permits_per_second
+    local ttl = math.ceil(capacity / permits_per_second * 2)
     redis.call('EXPIRE', key, ttl)
     
     return 0  -- 请求被拒绝

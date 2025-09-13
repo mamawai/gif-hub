@@ -97,4 +97,11 @@ public interface GifProcessService {
      * @return 随机GIF
      */
     GifVO getRandomGif();
+
+    /**
+     * 更新GIF查看次数
+     * @param fileId 文件名
+     * @return 是否更新成功
+     */
+    boolean updateViewCount(String fileId);
 }

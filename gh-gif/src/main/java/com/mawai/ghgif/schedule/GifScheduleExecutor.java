@@ -63,6 +63,7 @@ public class GifScheduleExecutor {
 
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
+    private static final String VIEW_COUNT_KEY = "gif:view:";
     private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:";
     private static final String USER_DISLIKE_KEY = "user:dislike:";
 
@@ -92,6 +93,13 @@ public class GifScheduleExecutor {
             .runAsync(this::syncDownloadCountToDatabase, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步下载计数失败: {}", e.getMessage(), e);
+                return null;
+            });
+
+        CompletableFuture
+            .runAsync(this::syncViewCountsToDatabase, scheduledExecutor)
+            .exceptionally(e -> {
+                log.error("同步查看计数失败: {}", e.getMessage(), e);
                 return null;
             });
             
@@ -180,6 +188,70 @@ public class GifScheduleExecutor {
     }
 
 
+    /**
+     * 同步查看次数到数据库
+     */
+    private void syncViewCountsToDatabase() {
+        try {
+            // 一次Redis请求完成：扫描匹配的key + 过滤非零值 + 获取值 + 重置为0
+            Map<String, Long> nonZeroCounters = cacheService.scanAndResetNonZeroCounters(VIEW_COUNT_KEY + "*");
+
+            if (nonZeroCounters.isEmpty()) {
+                log.info("没有GIF查看记录需要同步");
+                return;
+            }
+
+            log.info("发现{}个GIF查看记录需要同步", nonZeroCounters.size());
+            int prefixLength = VIEW_COUNT_KEY.length();
+
+            // 批量处理，每批最多100条记录
+            List<Gif> gifsToUpdate = new ArrayList<>();
+
+            for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
+                String countKey = entry.getKey();
+                Long viewCount = entry.getValue();
+
+                try {
+                    // 提取ID - 使用前缀长度直接获取
+                    if (countKey.length() <= prefixLength) {
+                        log.info("无效的键格式: {}", countKey);
+                        continue;
+                    }
+                    String gifId = countKey.substring(prefixLength);
+
+                    if (viewCount != null && viewCount != 0) {
+                        // 查询GIF记录
+                        Gif gif = gifService.getById(gifId);
+                        if (gif != null) {
+                            // 增加查看数（增量更新）
+                            int newViewCount = gif.getViewCount() + viewCount.intValue();
+                            gif.setViewCount(newViewCount);
+                            gif.setUpdatedAt(LocalDateTime.now());
+                            gifsToUpdate.add(gif);
+                            log.info("准备更新GIF(ID:{})查看数增量: {}, 新总数: {}", gifId, viewCount, newViewCount);
+
+                            // 达到批量大小时更新数据库
+                            if (gifsToUpdate.size() >= BATCH_SIZE) {
+                                gifService.updateBatchById(gifsToUpdate);
+                                log.info("已批量更新{}个GIF查看数", gifsToUpdate.size());
+                                gifsToUpdate.clear();
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("处理查看键失败: {}, 错误: {}", countKey, e.getMessage());
+                }
+            }
+
+            // 处理剩余记录
+            if (!gifsToUpdate.isEmpty()) {
+                gifService.updateBatchById(gifsToUpdate);
+                log.info("已批量更新剩余的{}个GIF查看数", gifsToUpdate.size());
+            }
+        } catch (Exception e) {
+            log.error("同步GIF查看数数据失败: {}", e.getMessage(), e);
+        }
+    }
 
     /**
      * 同步点赞数据到数据库
@@ -330,9 +402,12 @@ public class GifScheduleExecutor {
                 int endIndex = Math.min(i + MAX_CONCURRENT_DATA_FETCH, userIdList.size());
                 List<String> batch = userIdList.subList(i, endIndex);
 
-                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                    fetchUserDataConcurrently(batch, dataQueue);
-                }, virtualDataFetchExecutor);
+                CompletableFuture<Void> future = CompletableFuture
+                    .runAsync(() -> fetchUserDataConcurrently(batch, dataQueue), virtualDataFetchExecutor)
+                    .exceptionally(ex -> {
+                        log.error("处理用户数据失败: {}", ex.getMessage(), ex);
+                        return null;
+                    });
 
                 dataFetchFutures.add(future);
             }

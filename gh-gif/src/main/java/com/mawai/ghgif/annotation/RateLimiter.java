@@ -1,6 +1,7 @@
 package com.mawai.ghgif.annotation;
 
 import java.lang.annotation.*;
+import com.mawai.ghgif.constant.RateLimiterType;
 
 /**
  * 限流注解
@@ -30,5 +31,11 @@ public @interface RateLimiter {
      * @return 错误信息
      */
     String message() default "请求过于频繁，请稍后再试";
+
+    /**
+     * 限流器类型（必填，为了区分不同的限流器类型）
+     * @return 限流器类型
+     */
+    RateLimiterType type();
 }
 

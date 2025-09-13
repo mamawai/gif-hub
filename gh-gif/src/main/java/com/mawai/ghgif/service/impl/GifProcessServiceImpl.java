@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
+import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghgif.constant.RateLimiterType;
 import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghcommon.service.CacheService;
@@ -33,6 +35,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -136,6 +139,7 @@ public class GifProcessServiceImpl implements GifProcessService {
 
     private static final String LIKE_COUNT_KEY = "gif:like:";
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
+    private static final String VIEW_COUNT_KEY = "gif:view:"; // 查看次数缓存键
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
     private static final int EXPIRE_TIME = 2; // 过期时间
     private static final String GIF_DELETE_COUNT_KEY = "gif:delete:count"; // 删除计数器键
@@ -155,7 +159,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @throws FileUploadException 文件上传异常
      */
     @Override
-    @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试")
+    @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试", type = RateLimiterType.UPLOAD)
     public String r2uploadGif(GifDTO gifDTO) throws FileUploadException {
         // 获取请求内容
         MultipartFile file = gifDTO.getFile();
@@ -164,6 +168,7 @@ public class GifProcessServiceImpl implements GifProcessService {
         String description = gifDTO.getDescription();
         List<String> tags = gifDTO.getTags();
 
+        String gifFileName = null;
         // auto close stream
         try (InputStream inputStream = file.getInputStream()) {
 
@@ -175,7 +180,7 @@ public class GifProcessServiceImpl implements GifProcessService {
             String userIdStr = String.valueOf(userId);
             String firstLevel = userIdStr.length() >= 2 ? userIdStr.substring(0, 2) : userIdStr;
             String folder = "gifs/" + firstLevel + "/" + userId + "/";
-            String gifFileName = folder + baseFileName + fileExtension;
+            gifFileName = folder + baseFileName + fileExtension;
 
             // 创建PutObjectRequest
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -200,11 +205,22 @@ public class GifProcessServiceImpl implements GifProcessService {
                     .build();
 
             // 发送GIF消息到SQS
-            amazonSQSService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL);
+            amazonSQSService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL, MessageType.GIF_MESSAGE);
             return fileUrl;
         } catch (IOException | S3Exception e) {
             log.error("R2文件上传失败: {}", e.getMessage(), e);
             throw new FileUploadException("文件上传失败，请稍后再试");
+        } catch (RuntimeException e) {
+            // 发送GIF消息到SQS失败，删除r2文件
+            if (gifFileName != null) {
+                s3Client.deleteObject(
+                        DeleteObjectRequest.builder()
+                                .bucket(R2FileUtils.BUCKET_NAME)
+                                .key(gifFileName)
+                                .build()
+                );
+            }
+            throw e;
         }
     }
 
@@ -229,7 +245,7 @@ public class GifProcessServiceImpl implements GifProcessService {
             GifDTO gifDTO = gifsDTO.get(i);
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
-                    // 使用 getAopProxy 获取代理对象 防止事务失效
+                    // 使用 getAopProxy 获取代理对象，确保 @RateLimiter 切面生效
                     String url = SpringUtils.getAopProxy(this).r2uploadGif(gifDTO);
                     // 按原始索引位置存储结果
                     urlArray[index] = url;
@@ -356,7 +372,7 @@ public class GifProcessServiceImpl implements GifProcessService {
 
             // 删除GIF
             boolean success = gifService.removeById(fileId);
-            //TODO 如果删除成功，减少GIF总数 -- 后期转移到Audit模块
+            // TODO 如果删除成功，减少GIF总数 -- 后期转移到Audit模块
             if (success) {
                 decrementTotalGifCount(gif.getUserId());
                 Long incremented = cacheService.increment(GIF_DELETE_COUNT_KEY, 1);
@@ -422,8 +438,9 @@ public class GifProcessServiceImpl implements GifProcessService {
             resList.add(gifParamMapper.toGifVO(gif));
         }
         
-        // 批量合并缓存中的点赞数量
+        // 批量合并缓存中的点赞数量和查看数量
         batchMergeRealTimeLikeCount(resList);
+        batchMergeRealTimeViewCount(resList);
 
         return new ImmutablePair<>(resList, resultPage.getTotal());
     }
@@ -496,12 +513,13 @@ public class GifProcessServiceImpl implements GifProcessService {
             // 6. 直接查询状态正常的gif详情（一次数据库请求）
             List<Gif> gifs = getGifsByIdsWithStatus(pageGifIds);
 
-            // 7.转换为VO并合并缓存中的点赞数量
+            // 7.转换为VO并合并缓存中的点赞数量和查看数量
             List<GifVO> resList = new ArrayList<>();
             for (Gif gif : gifs) {
                 resList.add(gifParamMapper.toGifVO(gif));
             }
             batchMergeRealTimeLikeCount(resList);
+            batchMergeRealTimeViewCount(resList);
             
             return resList;
         } catch (Exception e) {
@@ -720,8 +738,9 @@ public class GifProcessServiceImpl implements GifProcessService {
             resList.add(gifParamMapper.toGifVO(gif));
         }
         
-        // 批量合并缓存中的点赞数量
+        // 批量合并缓存中的点赞数量和查看数量
         batchMergeRealTimeLikeCount(resList);
+        batchMergeRealTimeViewCount(resList);
         
         return resList;
     }
@@ -734,9 +753,23 @@ public class GifProcessServiceImpl implements GifProcessService {
     public GifVO getRandomGif() {
         // 随机获取一条数据
         GifVO gifVO = gifParamMapper.toGifVO(gifService.getRandomOne());
-        // 合并缓存中的点赞增量
+        // 合并缓存中的点赞增量和查看增量
         mergeRealTimeLikeCount(gifVO);
+        mergeRealTimeViewCount(gifVO);
         return gifVO;
+    }
+
+    /**
+     * 更新查看次数
+     * @param fileId 文件名
+     * @return 是否更新成功
+     */
+    @Override
+    @RateLimiter(permitsPerSecond = (3 / 60.0), bucketCapacity = 3, message = "更新查看次数频繁", type = RateLimiterType.VIEW)
+    public boolean updateViewCount(String fileId) {
+        // 查看次数+1 并设置过期时间
+        cacheService.increment(VIEW_COUNT_KEY + fileId, 1, EXPIRE_TIME, TimeUnit.MINUTES);
+        return true;
     }
 
     /**
@@ -760,6 +793,30 @@ public class GifProcessServiceImpl implements GifProcessService {
         } catch (Exception e) {
             // 合并失败不影响主流程，只记录日志
             log.warn("合并实时点赞数量失败: fileId={}, 错误: {}", gifVO.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 合并实时查看数量
+     * 将数据库中的查看数量与缓存中的增量合并，得到实时准确的查看数量
+     * 
+     * @param gifVO GIF视图对象
+     */
+    private void mergeRealTimeViewCount(GifVO gifVO) {
+        try {
+            // 从缓存获取当前文件的查看增量
+            String viewCountKey = VIEW_COUNT_KEY + gifVO.getId();
+            Long cachedIncrement = cacheService.getNumber(viewCountKey);
+            
+            if (cachedIncrement != null && cachedIncrement != 0) {
+                // 将数据库中的查看数与缓存增量相加
+                long currentViewCount = gifVO.getViewCount() != null ? gifVO.getViewCount() : 0L;            
+                // 更新GifVO中的查看数量
+                gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement));
+            }
+        } catch (Exception e) {
+            // 合并失败不影响主流程，只记录日志
+            log.warn("合并实时查看数量失败: fileId={}, 错误: {}", gifVO.getId(), e.getMessage());
         }
     }
 
@@ -799,6 +856,45 @@ public class GifProcessServiceImpl implements GifProcessService {
             }
         } catch (Exception e) {
             log.warn("批量合并实时点赞数量失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 批量合并实时查看数量（批量版本）
+     * 通过一次Redis调用获取多个文件的查看增量，显著提高性能
+     * 
+     * @param gifVOList GIF视图对象列表
+     */
+    private void batchMergeRealTimeViewCount(List<GifVO> gifVOList) {
+        if (gifVOList.isEmpty()) {
+            return;
+        }
+        
+        try {
+            // 构建所有需要查询的Redis键
+            List<String> viewCountKeys = gifVOList.stream()
+                    .map(gif -> VIEW_COUNT_KEY + gif.getId())
+                    .toList();
+            
+            // 批量获取所有查看增量（一次Redis调用获取所有数据，按顺序返回）
+            List<Long> cachedIncrements = cacheService.batchGetNumbers(viewCountKeys);
+            
+            // 遍历每个cachedIncrements，合并缓存中的查看增量
+            for (int i = 0; i < cachedIncrements.size(); i++) {
+                try {
+                    Long cachedIncrement = cachedIncrements.get(i);
+                    if (cachedIncrement != 0) {
+                        GifVO gifVO = gifVOList.get(i);
+                        // 将数据库中的查看数与缓存增量相加
+                        long currentViewCount = gifVO.getViewCount() != null ? gifVO.getViewCount() : 0L;
+                        gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement));
+                    }
+                } catch (Exception e) {
+                    log.warn("批量合并实时查看数量失败: fileId={}, 错误: {}", viewCountKeys.get(i), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("批量合并实时查看数量失败: {}", e.getMessage());
         }
     }
 }

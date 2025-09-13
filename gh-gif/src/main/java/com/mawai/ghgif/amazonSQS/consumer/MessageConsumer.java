@@ -1,6 +1,8 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import java.util.function.Consumer;
+
+import com.mawai.ghgif.constant.MessageType;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 public interface MessageConsumer {
@@ -12,9 +14,9 @@ public interface MessageConsumer {
     Consumer<Message> handleMessage();
 
     /**
-     * 获取队列URL
-     * @return 队列URL
+     * 获取队列Type
+     * @return 队列Type
      */
-    String getQueueUrl();
+    MessageType getType();
 
 }

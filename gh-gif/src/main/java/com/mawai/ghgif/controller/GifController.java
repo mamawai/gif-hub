@@ -108,6 +108,24 @@ public class GifController {
     }
 
     /**
+     * 更新查看次数
+     * @param fileId 文件id
+     * @return 更新结果
+     */
+    @Operation(summary = "更新查看次数", description = "更新查看次数")
+    @GetMapping("/view")
+    public ApiResponse<Boolean> updateViewCount(@RequestParam("fileId") String fileId) {
+        try {
+            boolean result = gifProcessService.updateViewCount(fileId);
+            return ApiResponse.success(result);
+        } catch (RateLimitException e) {
+            return ApiResponse.success(false, "更新查看次数频繁");
+        } catch (Exception e) {
+            return ApiResponse.error(500, "更新查看次数失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 更新点赞次数
      * @param likeRequestDTO 点赞请求
      * @return 更新结果

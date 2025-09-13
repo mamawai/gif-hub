@@ -10,5 +10,6 @@ public class GifVO {
     private String description; // 描述
     private Long likeCount; // 点赞次数
     private Long downloadCount; // 下载次数
+    private Long viewCount; // 查看次数
     private String userId; // 上传用户ID
 }

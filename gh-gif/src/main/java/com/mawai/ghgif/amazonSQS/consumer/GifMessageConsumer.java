@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
+import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.AmazonSQSService;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
@@ -49,7 +50,6 @@ public class GifMessageConsumer implements MessageConsumer {
     private static final String HANDLE_GIF_MSG_FAIL = "gif:msg:fail:";
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;
-
 
     @Override
     public Consumer<Message> handleMessage() {
@@ -232,7 +232,7 @@ public class GifMessageConsumer implements MessageConsumer {
     }
 
     @Override
-    public String getQueueUrl() {
-        return queueUrl;
+    public MessageType getType () {
+        return MessageType.GIF_MESSAGE;
     }
 }

@@ -1,16 +1,15 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import java.util.function.Consumer;
+
+import com.mawai.ghgif.constant.MessageType;
 import software.amazon.awssdk.services.sqs.model.Message;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 @Slf4j
-//@Component
+@Component
 public class EmailMessageConsumer implements MessageConsumer{
-
-    @Value("${aws.sqs.email-queue-url}")
-    private String queueUrl;
 
     @Override
     public Consumer<Message> handleMessage() {
@@ -18,7 +17,7 @@ public class EmailMessageConsumer implements MessageConsumer{
     }
 
     @Override
-    public String getQueueUrl() {
-        return queueUrl;
+    public MessageType getType() {
+        return MessageType.EMAIL_MESSAGE;
     }
 }
