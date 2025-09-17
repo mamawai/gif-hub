@@ -12,10 +12,7 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -30,11 +27,15 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
 
     // 全局共享的缓存线程池
     private static final ExecutorService executor = Executors.newCachedThreadPool(
-            r -> {
-                Thread thread = new Thread(r, "CustomSQSMessageConsumer-" + System.currentTimeMillis());
-                thread.setDaemon(true);
-                return thread;
-            });
+        r -> {
+            Thread thread = new Thread(r, "CustomSQSMessageConsumer-" + System.currentTimeMillis());
+            thread.setDaemon(true);
+            return thread;
+        }
+    );
+
+    // 虚拟线程
+    ExecutorService vte = Executors.newVirtualThreadPerTaskExecutor();
 
     private final SqsClient sqsClient;
     private final String queueUrl;
@@ -50,6 +51,8 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     // 状态控制
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CountDownLatch terminated;
+    private static final int CONCURRENCY_LIMIT = 600; // Semaphore最大并发数 -- Hikari10个线程支持6000tps，这里最大并发先设置为600 1/10
+    private final Semaphore messageSemaphore = new Semaphore(CONCURRENCY_LIMIT); // 控制消息处理并发数
     
 
     /**
@@ -109,8 +112,12 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
 
                     if (!messages.isEmpty()) {
                         log.info("轮询线程-{} 接收到 {} 条消息", threadId, messages.size());
-                        // 并行处理消息
-                        messages.parallelStream().forEach(this::handleMessage);
+                        // 使用虚拟线程和信号量处理每个消息
+                        messages.forEach(message -> {
+                            vte.submit(() -> handleMessageWithSemaphore(message));
+                        });
+                        // parallelStream并行处理
+                        // messages.parallelStream().forEach(this::handleMessage);
                     } else {
                         log.info("轮询线程-{} 没有收到消息", threadId);
                     }
@@ -130,6 +137,26 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
         } finally {
             terminated.countDown();
             log.debug("轮询线程-{} 已停止", threadId);
+        }
+    }
+
+    /**
+     * 并发控制
+     */
+    private void handleMessageWithSemaphore(Message message) {
+        try {
+            // 获取信号量许可，如果获取不到则阻塞等待
+            messageSemaphore.acquire();
+            try {
+                // 在虚拟线程中处理消息
+                handleMessage(message);
+            } finally {
+                // 无论处理成功还是失败，都要释放信号量许可
+                messageSemaphore.release();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("等待信号量许可时被中断: {}", message.messageId());
         }
     }
 
@@ -173,7 +200,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
             exceptionHandler.accept(processingException);
             
             try {
-                // 将消息可见性设置为0，让消息立即回到队列供重新处理 -- 注：最好结合死信队列来使用
+                // 将消息可见性设置为0，让消息立即回到队列供重新处理 -- 注：结合死信队列来使用，DLQ配置处理次数，达到对应次数就自动转发给DLQ
                 changeMessageVisibilityZero(message);
                 log.warn("消息处理失败，已重置可见性: {}", message.messageId());
             } catch (Exception cmvException) {
@@ -221,6 +248,18 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
         if (shuttingDown.compareAndSet(false, true)) {
             log.info("开始关闭SQS消费者: {}", queueUrl);
             runShutdownHook();
+            
+            // 关闭虚拟线程执行器
+            vte.shutdown();
+            try {
+                if (!vte.awaitTermination(30, TimeUnit.SECONDS)) {
+                    vte.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                vte.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+            
             // 注意：不关闭共享线程池，因为其他消费者可能还在使用
             log.info("SQS消费者已标记为关闭: {}", queueUrl);
         }

@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: gh-monitor
+server:
+  port: 8081
+

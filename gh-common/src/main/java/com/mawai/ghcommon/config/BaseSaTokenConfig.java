@@ -32,7 +32,8 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
                 "/v3/api-docs/**",
                 "/v3/api-docs",
                 "/favicon.ico",
-                "/error"
+                "/error",
+                "/actuator/**"
         );
     }
 

@@ -53,7 +53,7 @@ public class GifMessageConsumer implements MessageConsumer {
 
     @Override
     public Consumer<Message> handleMessage() {
-        return message -> SpringUtils.getAopProxy(this).handle(message);
+        return message -> SpringUtils.getAopProxy(this).handle(message); // 切面/事务生效
     }
 
     @Transactional(rollbackFor = Exception.class)
