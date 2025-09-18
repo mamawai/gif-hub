@@ -13,7 +13,9 @@ public enum MessageType {
 
     GIF_MESSAGE("gif"),
     
-    EMAIL_MESSAGE("email");
+    EMAIL_MESSAGE("email"),
+
+    USER_LIKES_MESSAGE("userLikes");
 
     private final String value;
 

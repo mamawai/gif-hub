@@ -23,7 +23,6 @@ import java.util.List;
 public class UserLikeServiceImpl extends ServiceImpl<UserLikeMapper, UserLike> implements UserLikeService {
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void insertOrUpdateBatchByUniqueKey(List<UserLike> userLikes) {
         if (userLikes == null || userLikes.isEmpty()) {
             return;

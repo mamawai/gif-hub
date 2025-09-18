@@ -5,7 +5,7 @@ import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
 import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.AmazonSQSService;
+import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.GifTag;
@@ -15,14 +15,10 @@ import com.mawai.ghmbplus.service.GifService;
 import com.mawai.ghmbplus.service.GifTagService;
 import com.mawai.ghmbplus.dao.TagMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.sqs.model.Message;
 import lombok.extern.slf4j.Slf4j;
@@ -40,9 +36,7 @@ public class GifMessageConsumer implements MessageConsumer {
     private final GifService gifService;
     private final GifDeleteService gifDeleteService;
     private final CacheService cacheService;
-    @Lazy
-    @Autowired
-    private AmazonSQSService amazonSQSService;
+    private final MessageService messageService;
     private final TagMapper tagMapper;
     private final GifTagService gifTagService;
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
@@ -59,29 +53,29 @@ public class GifMessageConsumer implements MessageConsumer {
     @Transactional(rollbackFor = Exception.class)
     public void handle(Message message) {
         String body = message.body();
+        String messageId = message.messageId();
         log.info("GifMessageConsumer: 处理GIF消息: {}", body);
 
         // 判断是否poll的是空消息
         if (body.isBlank()) return;
 
         GifMessage gifMessage = null;
+        String key = null;
         try {
             gifMessage = JSONUtil.toBean(body, GifMessage.class);
             Long userId = gifMessage.getUserId();
-            String key = GIF_MSG + gifMessage.getFileUrl() + ":" + gifMessage.getUserId();
-
+            key = GIF_MSG + messageId;
+            Number value = cacheService.getNumber(key);
             // 幂等性校验
-            if (cacheService.hasKey(key)) {
-                log.info("GIF消息已处理过，丢弃消息: {}", message);
-                amazonSQSService.delete(message.receiptHandle(), queueUrl);
+            if (value != null && value.longValue() == -1) {
+                log.info("GIF消息已处理成功，丢弃消息: {}", message);
+                messageService.deleteMessage(message.receiptHandle(), queueUrl);
                 return;
             }
 
             // 保存GIF信息
             Gif gif = buildGifFromMessage(gifMessage);
-            if (!gifService.insertOne(gif)) {
-                throw new RuntimeException("保存GIF文件失败");
-            }
+            if (!gifService.insertOne(gif)) throw new RuntimeException("保存GIF文件失败");
             log.info("保存GIF文件成功，ID: {}", gif.getId());
 
             // 保存标签信息（如果存在）
@@ -89,31 +83,36 @@ public class GifMessageConsumer implements MessageConsumer {
                 saveGifTags(gif.getId(), gifMessage.getTags());
             }
 
-            // 模拟抛出异常 throw new RuntimeException("模拟异常");
+            // 可在这里模拟抛出异常 throw new RuntimeException("模拟异常");
 
             // 事务成功后的回调
+            String finalKey = key;
             registerAfterCommit(() -> {
                 try {
                     // 增加GIF总数
                     incrementTotalGifCount(userId);
                     // 删除SQS消息
-                    amazonSQSService.delete(message.receiptHandle(), queueUrl);
-                    log.info("SQS消息删除成功");
+                    messageService.deleteMessage(message.receiptHandle(), queueUrl);
+                    // 处理成功加锁 / 这里 -1 区分重试和成功
+                    cacheService.set(finalKey, -1L, 6L, TimeUnit.HOURS);
+                    log.info("SQS消息删除成功，messageId: {}", messageId);
                 } catch (Exception e) {
-                    log.error("删除SQS消息失败: {}", e.getMessage(), e);
+                    log.error("删除SQS消息失败，messageId: {}", messageId, e);
                 }
             });
 
-            // 处理成功加锁
-            cacheService.set(key, "1", 6L, TimeUnit.HOURS);
-
         } catch (Exception e) {
             log.error("保存GIF文件失败，Message信息: {}", message, e);
-
+            Long times = null;
+            if (key != null) {
+                times = cacheService.increment(key, 1);
+            }
             // 记录失败信息 -- 等待clearDeletedGifs删除r2文件
-            // 通过Spring代理调用，确保事务注解生效
-            SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
-
+            // 通过代理调用，确保事务注解生效
+            // 要等times为 3 才处理
+            if (gifMessage != null && times != null && times == 3) {
+                SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
+            }
             throw new RuntimeException("保存GIF文件失败: " + e.getMessage(), e);
         }
     }
@@ -138,7 +137,7 @@ public class GifMessageConsumer implements MessageConsumer {
     /**
      * 保存GIF标签信息
      */
-    protected void saveGifTags(Long gifId, List<String> tags) {
+    private void saveGifTags(Long gifId, List<String> tags) {
         for (String tagName : tags) {
             // 1. 查找或创建Tag
             Tag tag = findOrCreateTag(tagName);
@@ -181,18 +180,6 @@ public class GifMessageConsumer implements MessageConsumer {
             log.warn("创建或修改标签失败: {}", tagName);
             return null; // 影响不是很大直接返回null 不处理这个标签
         }
-    }
-
-    /**
-     * 事务提交后执行的回调
-     */
-    private void registerAfterCommit(Runnable action) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                action.run();
-            }
-        });
     }
 
     /**

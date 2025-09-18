@@ -35,6 +35,7 @@ public class AmazonSQSClientConfig {
     
     @PostConstruct
     public void init() {
+        log.info("🔧 @PostConstruct: 初始化SQS客户端...");
         try {
             if (sqsClient == null) {
                 synchronized (AmazonSQSClientConfig.class) {
@@ -50,6 +51,7 @@ public class AmazonSQSClientConfig {
                                 .build();
                     }
                 }
+                log.info("✅ @PostConstruct: SQS客户端初始化完成");
             }
         } catch (Exception e) {
             log.error("Failed to initialize Amazon SQS Client", e);
@@ -59,8 +61,10 @@ public class AmazonSQSClientConfig {
 
     @PreDestroy
     public void destroy() {
+        log.info("🧹 @PreDestroy: 清理SQS客户端资源...");
         if (sqsClient != null) {
             sqsClient.close();
         }
+        log.info("✅ @PreDestroy: SQS客户端资源清理完成");
     }
 }

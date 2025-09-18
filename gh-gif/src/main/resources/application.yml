@@ -1,6 +1,10 @@
 spring:
   application:
     name: gh-gif
+  # 启用虚拟线程支持
+  threads:
+    virtual:
+      enabled: true
   data:
     redis:
       host: localhost
@@ -15,12 +19,23 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+  boot:
+    admin:
+      client:
+        url: http://localhost:8081
 
 # MyBatis-Plus配置
 mybatis-plus:
   mapper-locations: classpath*:./mappers/**/*.xml
 server:
   port: 8080
+
+# actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
 
 # AWS SQS 配置
 aws:

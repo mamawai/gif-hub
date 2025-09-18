@@ -12,8 +12,8 @@ import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
-import com.mawai.ghgif.service.AmazonSQSService;
 import com.mawai.ghgif.service.GifProcessService;
+import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
 import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.model.Gif;
@@ -66,7 +66,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final GifParamMapper gifParamMapper;
     private final GifDeleteService gifDeleteService;
     private final CacheService cacheService;
-    private final AmazonSQSService amazonSQSService;
+    private final MessageService messageService;
     // 注入线程池
     private final Executor fileUploadExecutor;
     
@@ -205,7 +205,7 @@ public class GifProcessServiceImpl implements GifProcessService {
                     .build();
 
             // 发送GIF消息到SQS
-            amazonSQSService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL, MessageType.GIF_MESSAGE);
+            messageService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL, MessageType.GIF_MESSAGE);
             return fileUrl;
         } catch (IOException | S3Exception e) {
             log.error("R2文件上传失败: {}", e.getMessage(), e);
@@ -782,13 +782,13 @@ public class GifProcessServiceImpl implements GifProcessService {
         try {
             // 从缓存获取当前文件的点赞增量
             String likeCountKey = LIKE_COUNT_KEY + gifVO.getId();
-            Long cachedIncrement = cacheService.getNumber(likeCountKey);
+            Number cachedIncrement = cacheService.getNumber(likeCountKey);
             
-            if (cachedIncrement != null && cachedIncrement != 0) {
+            if (cachedIncrement != null && cachedIncrement.longValue() != 0) {
                 // 将数据库中的点赞数与缓存增量相加
                 long currentLikeCount = gifVO.getLikeCount() != null ? gifVO.getLikeCount() : 0L;            
                 // 更新GifVO中的点赞数量
-                gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement));
+                gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement.longValue()));
             }
         } catch (Exception e) {
             // 合并失败不影响主流程，只记录日志
@@ -806,13 +806,13 @@ public class GifProcessServiceImpl implements GifProcessService {
         try {
             // 从缓存获取当前文件的查看增量
             String viewCountKey = VIEW_COUNT_KEY + gifVO.getId();
-            Long cachedIncrement = cacheService.getNumber(viewCountKey);
+            Number cachedIncrement = cacheService.getNumber(viewCountKey);
             
-            if (cachedIncrement != null && cachedIncrement != 0) {
+            if (cachedIncrement != null && cachedIncrement.longValue() != 0) {
                 // 将数据库中的查看数与缓存增量相加
                 long currentViewCount = gifVO.getViewCount() != null ? gifVO.getViewCount() : 0L;            
                 // 更新GifVO中的查看数量
-                gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement));
+                gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement.longValue()));
             }
         } catch (Exception e) {
             // 合并失败不影响主流程，只记录日志

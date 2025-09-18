@@ -86,14 +86,20 @@ public class CacheService {
      * @return 值
      */
     public <T> T getNumber(String key) {
-        Object value = redisTemplate.opsForValue().get(key);
-        if (value instanceof Number) {
-            return (T) value;
-        } if (value ==  null) {
+        try {
+            Object value = redisTemplate.opsForValue().get(key);
+            if (value instanceof Number) {
+                return (T) value;
+            }
+            if (value ==  null) {
+                return null;
+            }
+            log.warn("{} 的值不是数字类型", key);
+            return null;
+        } catch (Exception e) {
+            log.error("getNumber获取值失败: {}", e.getMessage(), e);
             return null;
         }
-        log.error("{} 的值不是数字类型", key);
-        return null;
     }
 
     /**
