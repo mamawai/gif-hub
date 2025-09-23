@@ -93,14 +93,14 @@ public class GifController {
 
     /**
      * 更新GIF下载次数
-     * @param fileName 文件名
+     * @param fileId 文件Id
      * @return 更新结果
      */
     @Operation(summary = "更新GIF下载次数", description = "更新GIF下载次数")
     @GetMapping("/download")
-    public ApiResponse<Boolean> recordDownload(@RequestParam("fileName") String fileName) {
+    public ApiResponse<Boolean> recordDownload(@RequestParam("fileId") String fileId) {
         try {
-            boolean result = gifProcessService.updateDownloadCount(fileName);
+            boolean result = gifProcessService.updateDownloadCount(fileId);
             return ApiResponse.success(result);
         } catch (Exception e) {
             return ApiResponse.error(500, "更新下载次数失败: " + e.getMessage());

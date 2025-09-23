@@ -23,7 +23,7 @@ import java.util.List;
 public class AmazonSQSService implements SmartLifecycle {
 
     private SqsClient sqsClient;
-    private volatile boolean running = false; // 启动前若为true，则sqs关闭
+    private volatile boolean running = true; // 启动前若为true，则sqs关闭
     private final List<MessageConsumer> messageConsumers;
     private CustomSQSMessageConsumer sqsMessageConsumer;
     
@@ -50,15 +50,7 @@ public class AmazonSQSService implements SmartLifecycle {
 
             // 创建消息路由器
             MessageRouter messageRouter = new MessageRouter();
-
-            // 注册所有消息处理器到message router
-            for (MessageConsumer messageConsumer : messageConsumers) {
-                if (StrUtil.isNotBlank(messageConsumer.getType().getValue())) {
-                    messageRouter.registerHandler(messageConsumer.getType().getValue(), messageConsumer);
-                } else {
-                    log.warn("未找到消费者Bean名称: {}", messageConsumer.getClass().getSimpleName());
-                }
-            }
+            registerConsumer(messageRouter);
 
             // 创建统一的CustomSQSMessageConsumer
             sqsMessageConsumer = CustomSQSMessageConsumer.builder()
@@ -76,6 +68,19 @@ public class AmazonSQSService implements SmartLifecycle {
 
             running = true;
             log.info("✅ SmartLifecycle.start(): 统一SQS消费者启动完成，已注册{}个处理器", messageRouter.getHandlerCount());
+        }
+    }
+
+    /**
+     * 注册所有消息处理器到messageRouter
+     */
+    private void registerConsumer(MessageRouter messageRouter) {
+        for (MessageConsumer messageConsumer : messageConsumers) {
+            if (StrUtil.isNotBlank(messageConsumer.getType().getValue())) {
+                messageRouter.registerHandler(messageConsumer.getType().getValue(), messageConsumer);
+            } else {
+                log.warn("未找到消费者Bean名称: {}", messageConsumer.getClass().getSimpleName());
+            }
         }
     }
 

@@ -280,24 +280,14 @@ public class GifProcessServiceImpl implements GifProcessService {
 
     /**
      * 更新下载次数
-     * @param fileName 文件名
+     * @param fileId 文件Id
      * @return 是否更新成功
      */
     @Override
-    public boolean updateDownloadCount(String fileName) {
-        try {
-            // 创建redis key
-            String countKey = DOWNLOAD_COUNT_KEY + fileName;
-
+    public boolean updateDownloadCount(String fileId) {
             // 下载次数+1 并设置过期时间
-            cacheService.increment(countKey, 1, EXPIRE_TIME, TimeUnit.MINUTES);
-
+            cacheService.increment(DOWNLOAD_COUNT_KEY + fileId, 1, EXPIRE_TIME, TimeUnit.MINUTES);
             return true;
-        } catch (Exception e) {
-            // 记录日志
-            log.error("更新下载次数失败: {}", e.getMessage());
-            return false;
-        }
     }
 
     /**

@@ -38,14 +38,5 @@ public class VirtualThreadMonitor {
         } catch (Exception e) {
             log.error("❌ 虚拟线程测试失败: {}", e.getMessage(), e);
         }
-        
-        log.info("=== 虚拟线程改造完成 ===");
-        log.info("📁 文件上传: 使用虚拟线程执行器 (fileUploadExecutor)");
-        log.info("📧 邮件发送: 使用虚拟线程执行器 (emailSendExecutor)");
-        log.info("⏰ 定时任务: 生产者-消费者模式");
-        log.info("   ├─ 虚拟线程: 并发获取Redis数据 (IO密集型)");
-        log.info("   ├─ 固定线程池: 批量数据库操作 (避免连接池竞争)");
-        log.info("   └─ 队列解耦: 数据获取与数据库写入分离");
-        log.info("🚀 预期性能提升: 3-5倍处理能力，数据库压力可控");
     }
 }

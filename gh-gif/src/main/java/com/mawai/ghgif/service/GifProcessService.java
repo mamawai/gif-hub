@@ -48,10 +48,10 @@ public interface GifProcessService {
     
     /**
      * 更新GIF下载次数
-     * @param fileName 文件名
+     * @param fileId 文件Id
      * @return 是否更新成功
      */
-    boolean updateDownloadCount(String fileName);
+    boolean updateDownloadCount(String fileId);
 
     /**
      * 更新GIF点赞次数

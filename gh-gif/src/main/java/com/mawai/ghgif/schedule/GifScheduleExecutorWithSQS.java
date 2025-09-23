@@ -55,8 +55,6 @@ public class GifScheduleExecutorWithSQS {
     private final R2FileUtils r2FileUtils;
 
     private static final int SYNC_INTERVAL = 1; // 同步间隔
-    private static final int BATCH_SIZE = 100; // 批量处理大小
-    private static final int MAX_CONCURRENT_DATA_FETCH = 20; // 最大并发数据获取线程数
 
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
@@ -137,7 +135,6 @@ public class GifScheduleExecutorWithSQS {
             log.info("发现{}个GIF下载记录需要同步", nonZeroCounters.size());
             int prefixLength = DOWNLOAD_COUNT_KEY.length();
 
-            // 批量处理，每批最多100条记录
             List<Gif> gifsToUpdate = new ArrayList<>();
             
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
@@ -162,13 +159,6 @@ public class GifScheduleExecutorWithSQS {
                             gif.setUpdatedAt(LocalDateTime.now());
                             gifsToUpdate.add(gif);
                             log.debug("准备更新GIF(ID:{})下载数增量: +{}, 新总数: {}", gifId, downloadCount, newDownloadCount);
-                            
-                            // 达到批量大小时更新数据库
-                            if (gifsToUpdate.size() >= BATCH_SIZE) {
-                                gifService.updateBatchById(gifsToUpdate);
-                                log.info("已批量更新{}个GIF下载数", gifsToUpdate.size());
-                                gifsToUpdate.clear();
-                            }
                         }
                     }
                     
@@ -204,7 +194,6 @@ public class GifScheduleExecutorWithSQS {
             log.info("发现{}个GIF查看记录需要同步", nonZeroCounters.size());
             int prefixLength = VIEW_COUNT_KEY.length();
 
-            // 批量处理，每批最多100条记录
             List<Gif> gifsToUpdate = new ArrayList<>();
 
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
@@ -229,13 +218,6 @@ public class GifScheduleExecutorWithSQS {
                             gif.setUpdatedAt(LocalDateTime.now());
                             gifsToUpdate.add(gif);
                             log.info("准备更新GIF(ID:{})查看数增量: {}, 新总数: {}", gifId, viewCount, newViewCount);
-
-                            // 达到批量大小时更新数据库
-                            if (gifsToUpdate.size() >= BATCH_SIZE) {
-                                gifService.updateBatchById(gifsToUpdate);
-                                log.info("已批量更新{}个GIF查看数", gifsToUpdate.size());
-                                gifsToUpdate.clear();
-                            }
                         }
                     }
                 } catch (Exception e) {
@@ -264,8 +246,10 @@ public class GifScheduleExecutorWithSQS {
      *   <li>提取每个键中的GIF ID</li>
      *   <li>获取点赞计数并原子性地重置Redis计数</li>
      *   <li>查询对应GIF记录并增加点赞数（增量更新）</li>
-     *   <li>批量更新数据库（每{@link #BATCH_SIZE}条记录一批）</li>
+     *   <li>批量更新数据库（默认每1000条记录一批）</li>
      * </ol>
+     *
+     * 由于重置为0到db更新这段时间查询会不一致，所以先把db更新放在这里先不用SQS
      * 
      * <p>整个过程有完整的日志记录，包括同步数量和异常处理。</p>
      */
@@ -281,10 +265,10 @@ public class GifScheduleExecutorWithSQS {
             
             log.info("发现{}个GIF点赞和取消点赞记录需要同步", nonZeroCounters.size());
             int prefixLength = LIKE_COUNT_KEY.length();
-            
-            // 批量处理，每批最多100条记录
+
             List<Gif> gifsToUpdate = new ArrayList<>();
-            
+
+            // 先串行处理如果耗时过长考虑并发处理 -- ForkJoinPool + ConcurrentLinkedDeque
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
                 String countKey = entry.getKey();
                 Long likeCount = entry.getValue();
@@ -307,13 +291,6 @@ public class GifScheduleExecutorWithSQS {
                             gif.setUpdatedAt(LocalDateTime.now());
                             gifsToUpdate.add(gif);
                             log.info("准备更新GIF(ID:{})点赞数增量: {}, 新总数: {}", gifId, likeCount, newLikeCount);
-                            
-                            // 达到批量大小时更新数据库
-                            if (gifsToUpdate.size() >= BATCH_SIZE) {
-                                gifService.updateBatchById(gifsToUpdate);
-                                log.info("已批量更新{}个GIF点赞数", gifsToUpdate.size());
-                                gifsToUpdate.clear();
-                            }
                         }
                     }
                 } catch (Exception e) {
@@ -321,10 +298,10 @@ public class GifScheduleExecutorWithSQS {
                 }
             }
             
-            // 处理剩余记录
+            // 统一处理
             if (!gifsToUpdate.isEmpty()) {
                 gifService.updateBatchById(gifsToUpdate);
-                log.info("已批量更新剩余的{}个GIF点赞数", gifsToUpdate.size());
+                log.info("已批量更新{}个GIF点赞数", gifsToUpdate.size());
             }
         } catch (Exception e) {
             log.error("同步GIF点赞数据失败: {}", e.getMessage(), e);
@@ -342,13 +319,12 @@ public class GifScheduleExecutorWithSQS {
      * <ol>
      *   <li>调用 {@code cacheService.getUserIdsWithLikeDataOptimized()} 获取Redis中有数据的用户ID</li>
      *   <li>如果无数据则直接返回，记录日志</li>
-     *   <li>将用户ID列表按 {@value #MAX_CONCURRENT_DATA_FETCH} 分批处理</li>
-     *   <li>每批调用 {@code fetchUserDataConcurrently()} 并发获取用户数据</li>
+     *   <li>遍历userIds {@code fetchSingleUserData(userId)}</li>
      *   <li>将数据封装为 {@code UserLikesMessage} 发送到SQS队列</li>
      *   <li>由 {@code UserLikesConsumer} 异步消费并同步到数据库</li>
      * </ol>
      * 
-     * <h3>相关组件：</h3>
+     * <h3>相关：</h3>
      * <ul>
      *   <li>{@code UserLikesConsumer} - SQS消息消费者，处理数据库同步</li>
      *   <li>{@code UserLikesMessage} - 用户喜欢数据的消息封装类</li>
@@ -359,7 +335,6 @@ public class GifScheduleExecutorWithSQS {
      * @since 2.0.0 - SQS异步重构版本
      * @see UserLikesConsumer#handleMessage()
      * @see UserLikesMessage
-     * @see #fetchUserDataConcurrently(List)
      */
     private void syncUserLikesToDatabaseConcurrent() {
         try {
@@ -372,12 +347,26 @@ public class GifScheduleExecutorWithSQS {
             }
             log.info("发现{}个用户的喜欢和不喜欢记录需要同步，使用sqs处理当前是生产者", userIds.size());
 
-            List<String> userIdList = new ArrayList<>(userIds);
-            // 控制并发数，避免Redis压力过大
-            for (int i = 0; i < userIdList.size(); i += MAX_CONCURRENT_DATA_FETCH) {
-                fetchUserDataConcurrently(userIdList.subList(i, Math.min(i + MAX_CONCURRENT_DATA_FETCH, userIdList.size())));
-            }
-            log.info("已发送{}个请求，等待消费者处理完剩余数据", userIdList.size());
+            // 直接forEach或者直增强for都可以
+            userIds.forEach(userId ->
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            UserLikeData data = fetchSingleUserData(userId);
+                            if (data != null) {
+                                // send to SQS
+                                UserLikesMessage userLikesMessage = UserLikesMessage.builder()
+                                        .userId(data.userId)
+                                        .deleteLikes(data.deleteLikes)
+                                        .newLikes(data.newLikes)
+                                        .build();
+                                messageService.send(JSONUtil.toJsonStr(userLikesMessage), SQS_QUEUE_URL, MessageType.USER_LIKES_MESSAGE);
+                            }
+                        } catch (Exception e) {
+                            log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
+                        }
+                    }, virtualDataFetchExecutor)); // 虚拟线程并发
+
+            log.info("已发送{}个请求，等待消费者处理完剩余数据", userIds.size());
 
         } catch (Exception e) {
             log.error("生产者同步用户喜欢记录失败: {}", e.getMessage(), e);
@@ -527,25 +516,6 @@ public class GifScheduleExecutorWithSQS {
             List<UserLike> newLikes,
             List<UserLike> deleteLikes) {
 
-    }
-
-    /**
-     * 使用虚拟线程并发获取用户数据（带背压控制）
-     */
-    private void fetchUserDataConcurrently(List<String> userIds) {
-        userIds.forEach(userId ->
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        UserLikeData data = fetchSingleUserData(userId);
-                        if (data != null) {
-                            // send to SQS
-                            UserLikesMessage userLikesMessage = UserLikesMessage.builder().userId(data.userId).deleteLikes(data.deleteLikes).newLikes(data.newLikes).build();
-                            messageService.send(JSONUtil.toJsonStr(userLikesMessage), SQS_QUEUE_URL, MessageType.USER_LIKES_MESSAGE);
-                        }
-                    } catch (Exception e) {
-                        log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
-                    }
-                }, virtualDataFetchExecutor));
     }
 
     /**
