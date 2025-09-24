@@ -159,7 +159,7 @@ public class GifMessageConsumer implements MessageConsumer {
 
     /**
      * 查找或创建标签
-     * 使用数据库的INSERT ... ON DUPLICATE KEY UPDATE解决并发问题
+     * 使用数据库的INSERT ... ON DUPLICATE KEY UPDATE
      */
     private Tag findOrCreateTag(String tagName) {
         Tag tag = new Tag().setName(tagName).setUseCount(1);

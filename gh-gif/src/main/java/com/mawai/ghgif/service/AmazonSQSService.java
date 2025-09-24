@@ -23,7 +23,7 @@ import java.util.List;
 public class AmazonSQSService implements SmartLifecycle {
 
     private SqsClient sqsClient;
-    private volatile boolean running = true; // 启动前若为true，则sqs关闭
+    private volatile boolean running = false; // 启动前若为true，则sqs关闭
     private final List<MessageConsumer> messageConsumers;
     private CustomSQSMessageConsumer sqsMessageConsumer;
     

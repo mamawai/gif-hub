@@ -23,6 +23,7 @@ import com.mawai.ghmbplus.service.GifDeleteService;
 import com.mawai.ghmbplus.service.GifService;
 import com.mawai.ghmbplus.service.UserLikeService;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -50,6 +51,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -74,7 +77,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private S3Client s3Client;
     
     @PostConstruct
-    public void init() {
+    private void init() {
         this.s3Client = r2FileUtils.getS3Client();
         initTotalGifCount();
     }
@@ -428,9 +431,8 @@ public class GifProcessServiceImpl implements GifProcessService {
             resList.add(gifParamMapper.toGifVO(gif));
         }
         
-        // 批量合并缓存中的点赞数量和查看数量
-        batchMergeRealTimeLikeCount(resList);
-        batchMergeRealTimeViewCount(resList);
+        // 合并所有实时数量
+        mergeAllRealTimeCounts(resList);
 
         return new ImmutablePair<>(resList, resultPage.getTotal());
     }
@@ -503,13 +505,13 @@ public class GifProcessServiceImpl implements GifProcessService {
             // 6. 直接查询状态正常的gif详情（一次数据库请求）
             List<Gif> gifs = getGifsByIdsWithStatus(pageGifIds);
 
-            // 7.转换为VO并合并缓存中的点赞数量和查看数量
+            // 7.转换为VO并合并所有实时数量
             List<GifVO> resList = new ArrayList<>();
             for (Gif gif : gifs) {
                 resList.add(gifParamMapper.toGifVO(gif));
             }
-            batchMergeRealTimeLikeCount(resList);
-            batchMergeRealTimeViewCount(resList);
+            // 合并所有实时数量
+            mergeAllRealTimeCounts(resList);
             
             return resList;
         } catch (Exception e) {
@@ -728,10 +730,8 @@ public class GifProcessServiceImpl implements GifProcessService {
             resList.add(gifParamMapper.toGifVO(gif));
         }
         
-        // 批量合并缓存中的点赞数量和查看数量
-        batchMergeRealTimeLikeCount(resList);
-        batchMergeRealTimeViewCount(resList);
-        
+        // 合并所有实时数量
+        mergeAllRealTimeCounts(resList);
         return resList;
     }
 
@@ -743,14 +743,13 @@ public class GifProcessServiceImpl implements GifProcessService {
     public GifVO getRandomGif() {
         // 随机获取一条数据
         GifVO gifVO = gifParamMapper.toGifVO(gifService.getRandomOne());
-        // 合并缓存中的点赞增量和查看增量
-        mergeRealTimeLikeCount(gifVO);
-        mergeRealTimeViewCount(gifVO);
+        // 合并所有实时数量
+        mergeAllRealTimeCounts(List.of(gifVO));
         return gifVO;
     }
 
     /**
-     * 更新查看次数
+     * 更新查看次数 -- 每人每分钟对于一个GIF文件的查看次数最多为3次超过3次的不计数
      * @param fileId 文件名
      * @return 是否更新成功
      */
@@ -763,128 +762,72 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 合并实时点赞数量
-     * 将数据库中的点赞数量与缓存中的增量合并，得到实时准确的点赞数量
+     * 合并所有实时数量（点赞、查看、下载）
      * 
-     * @param gifVO GIF视图对象
+     * @param gifVOList GIF列表
      */
-    private void mergeRealTimeLikeCount(GifVO gifVO) {
-        try {
-            // 从缓存获取当前文件的点赞增量
-            String likeCountKey = LIKE_COUNT_KEY + gifVO.getId();
-            Number cachedIncrement = cacheService.getNumber(likeCountKey);
-            
-            if (cachedIncrement != null && cachedIncrement.longValue() != 0) {
-                // 将数据库中的点赞数与缓存增量相加
-                long currentLikeCount = gifVO.getLikeCount() != null ? gifVO.getLikeCount() : 0L;            
-                // 更新GifVO中的点赞数量
-                gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement.longValue()));
-            }
-        } catch (Exception e) {
-            // 合并失败不影响主流程，只记录日志
-            log.warn("合并实时点赞数量失败: fileId={}, 错误: {}", gifVO.getId(), e.getMessage());
-        }
-    }
-
-    /**
-     * 合并实时查看数量
-     * 将数据库中的查看数量与缓存中的增量合并，得到实时准确的查看数量
-     * 
-     * @param gifVO GIF视图对象
-     */
-    private void mergeRealTimeViewCount(GifVO gifVO) {
-        try {
-            // 从缓存获取当前文件的查看增量
-            String viewCountKey = VIEW_COUNT_KEY + gifVO.getId();
-            Number cachedIncrement = cacheService.getNumber(viewCountKey);
-            
-            if (cachedIncrement != null && cachedIncrement.longValue() != 0) {
-                // 将数据库中的查看数与缓存增量相加
-                long currentViewCount = gifVO.getViewCount() != null ? gifVO.getViewCount() : 0L;            
-                // 更新GifVO中的查看数量
-                gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement.longValue()));
-            }
-        } catch (Exception e) {
-            // 合并失败不影响主流程，只记录日志
-            log.warn("合并实时查看数量失败: fileId={}, 错误: {}", gifVO.getId(), e.getMessage());
-        }
-    }
-
-    /**
-     * 批量合并实时点赞数量（批量版本）
-     * 通过一次Redis调用获取多个文件的点赞增量，显著提高性能
-     * 
-     * @param gifVOList GIF视图对象列表
-     */
-    private void batchMergeRealTimeLikeCount(List<GifVO> gifVOList) {
-        if (gifVOList.isEmpty()) {
-            return;
-        }
+    private void mergeAllRealTimeCounts(List<GifVO> gifVOList) {
+        if (gifVOList.isEmpty()) return;
         
         try {
-            // 构建所有需要查询的Redis键
-            List<String> likeCountKeys = gifVOList.stream()
-                    .map(gif -> LIKE_COUNT_KEY + gif.getId())
-                    .toList();
+            CountType[] types = CountType.values();
             
-            // 批量获取所有点赞增量（一次Redis调用获取所有数据，按顺序返回）
-            List<Long> cachedIncrements = cacheService.batchGetNumbers(likeCountKeys);
+            // 构建所有需要查询的Redis键（按类型分组）
+            List<String> allKeys = new ArrayList<>();
+            for (CountType type : types) {
+                for (GifVO gifVO : gifVOList) {
+                    allKeys.add(type.getKeyPrefix() + gifVO.getId());
+                }
+            }
             
-            // 遍历每个cachedIncrements，合并缓存中的点赞增量
-            for (int i = 0; i < cachedIncrements.size(); i++) {
-                try {
-                    Long cachedIncrement = cachedIncrements.get(i);
-                    if (cachedIncrement != 0) {
-                        GifVO gifVO = gifVOList.get(i);
-                        // 将数据库中的点赞数与缓存增量相加
-                        long currentLikeCount = gifVO.getLikeCount() != null ? gifVO.getLikeCount() : 0L;
-                        gifVO.setLikeCount(Math.max(0, currentLikeCount + cachedIncrement));
+            // 批量获取所有增量数据
+            List<Long> allIncrements = cacheService.batchGetNumbers(allKeys);
+            
+            // 按类型处理数据
+            int typeCount = types.length;
+            int gifCount = gifVOList.size();
+            
+            for (int typeIndex = 0; typeIndex < typeCount; typeIndex++) {
+                CountType type = types[typeIndex];
+                int startIndex = typeIndex * gifCount;
+                
+                for (int gifIndex = 0; gifIndex < gifCount; gifIndex++) {
+                    try {
+                        Long increment = allIncrements.get(startIndex + gifIndex);
+                        if (increment != null && increment != 0) {
+                            GifVO gifVO = gifVOList.get(gifIndex);
+                            long currentValue = Optional.ofNullable(type.getGetter().apply(gifVO)).orElse(0L);
+                            type.getSetter().accept(gifVO, Math.max(0, currentValue + increment));
+                        }
+                    } catch (Exception e) {
+                        log.warn("批量合并实时数量失败: fileId={}, type={}, 错误: {}",
+                                gifVOList.get(gifIndex).getId(), type.getKeyPrefix(), e.getMessage());
                     }
-                } catch (Exception e) {
-                    log.warn("批量合并实时点赞数量失败: fileId={}, 错误: {}", likeCountKeys.get(i), e.getMessage());
                 }
             }
         } catch (Exception e) {
-            log.warn("批量合并实时点赞数量失败: {}", e.getMessage());
+            log.warn("批量合并所有实时数量失败: {}", e.getMessage());
         }
     }
 
     /**
-     * 批量合并实时查看数量（批量版本）
-     * 通过一次Redis调用获取多个文件的查看增量，显著提高性能
-     * 
-     * @param gifVOList GIF视图对象列表
+     * GIFvo获取实时数量枚举，如果有新增的实时数量，请添加枚举
      */
-    private void batchMergeRealTimeViewCount(List<GifVO> gifVOList) {
-        if (gifVOList.isEmpty()) {
-            return;
-        }
-        
-        try {
-            // 构建所有需要查询的Redis键
-            List<String> viewCountKeys = gifVOList.stream()
-                    .map(gif -> VIEW_COUNT_KEY + gif.getId())
-                    .toList();
-            
-            // 批量获取所有查看增量（一次Redis调用获取所有数据，按顺序返回）
-            List<Long> cachedIncrements = cacheService.batchGetNumbers(viewCountKeys);
-            
-            // 遍历每个cachedIncrements，合并缓存中的查看增量
-            for (int i = 0; i < cachedIncrements.size(); i++) {
-                try {
-                    Long cachedIncrement = cachedIncrements.get(i);
-                    if (cachedIncrement != 0) {
-                        GifVO gifVO = gifVOList.get(i);
-                        // 将数据库中的查看数与缓存增量相加
-                        long currentViewCount = gifVO.getViewCount() != null ? gifVO.getViewCount() : 0L;
-                        gifVO.setViewCount(Math.max(0, currentViewCount + cachedIncrement));
-                    }
-                } catch (Exception e) {
-                    log.warn("批量合并实时查看数量失败: fileId={}, 错误: {}", viewCountKeys.get(i), e.getMessage());
-                }
-            }
-        } catch (Exception e) {
-            log.warn("批量合并实时查看数量失败: {}", e.getMessage());
+    @Getter
+    private enum CountType {
+        LIKE(LIKE_COUNT_KEY, GifVO::getLikeCount, GifVO::setLikeCount),
+        VIEW(VIEW_COUNT_KEY, GifVO::getViewCount, GifVO::setViewCount),
+        DOWNLOAD(DOWNLOAD_COUNT_KEY, GifVO::getDownloadCount, GifVO::setDownloadCount);
+
+        private final String keyPrefix;
+        private final Function<GifVO, Long> getter;
+        private final BiConsumer<GifVO, Long> setter;
+
+        CountType(String keyPrefix, Function<GifVO, Long> getter, BiConsumer<GifVO, Long> setter) {
+            this.keyPrefix = keyPrefix;
+            this.getter = getter;
+            this.setter = setter;
         }
     }
+
 }
