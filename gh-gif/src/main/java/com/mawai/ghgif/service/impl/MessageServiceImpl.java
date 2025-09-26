@@ -5,6 +5,7 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.MessageService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -17,13 +18,15 @@ import java.util.Map;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class MessageServiceImpl implements MessageService {
 
     private SqsClient sqsClient;
+    private final AmazonSQSClientConfig amazonSQSClientConfig;
 
     @PostConstruct
     public void init() {
-        sqsClient = AmazonSQSClientConfig.getSqsClient();
+        sqsClient = amazonSQSClientConfig.getSqsClient();
     }
 
     @PreDestroy

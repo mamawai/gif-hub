@@ -26,11 +26,6 @@ public class AmazonSQSClientConfig {
     @Value("${aws.secret-access-key}")
     private String secretAccessKey;
 
-    /**
-     * -- GETTER --
-     *  Get the SQS client
-     */
-    @Getter
     private static volatile SqsClient sqsClient;
     
     @PostConstruct
@@ -66,5 +61,9 @@ public class AmazonSQSClientConfig {
             sqsClient.close();
         }
         log.info("✅ @PreDestroy: SQS客户端资源清理完成");
+    }
+
+    public SqsClient getSqsClient() {
+        return sqsClient;
     }
 }

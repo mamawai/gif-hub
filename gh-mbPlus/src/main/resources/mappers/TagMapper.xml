@@ -9,8 +9,27 @@
             use_count = use_count + 1
     </insert>
 
+    <update id="updateUseCountByMap" parameterType="java.util.Map">
+        UPDATE tag
+        <set>
+            use_count = CASE id
+                <foreach item="entry" collection="tagIdCountMap.entrySet()" separator="," open="(" close=")">
+                    WHEN #{entry.key} THEN use_count - #{entry.value}
+                </foreach>
+            END
+        </set>
+        WHERE id IN
+        <foreach item="id" collection="tagIdCountMap.keySet()" separator="," open="(" close=")">
+            #{id}
+        </foreach>
+    </update>
+
     <select id="selectByName" parameterType="string" resultType="com.mawai.ghmbplus.model.Tag">
         SELECT * FROM tag WHERE name = #{name}
+    </select>
+
+    <select id="selectHotTags" resultType="com.mawai.ghmbplus.model.Tag">
+        select name, use_count from tag force index (idx_use_count) order by use_count desc limit 20
     </select>
 
 </mapper>

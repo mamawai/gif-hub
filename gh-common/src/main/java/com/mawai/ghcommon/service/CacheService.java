@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Range;
+import org.springframework.data.redis.connection.Limit;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -561,5 +563,76 @@ public class CacheService {
             log.error("扫描并重置非零计数器失败: pattern={}, 错误: {}", pattern, e.getMessage(), e);
             return new HashMap<>();
         }
+    }
+
+    /**
+     * 获取有序集合指定范围的元素
+     * @param key 键
+     * @param min 最小值
+     * @param max 最大值
+     * @param offset 偏移量
+     * @param count 数量限制
+     * @return 元素列表
+     */
+    public Set<String> zRangeByLex(String key, String min, String max, int offset, int count) {
+        return stringRedisTemplate.opsForZSet().rangeByLex(
+                key,
+                Range.from(Range.Bound.inclusive(min)).to(Range.Bound.exclusive(max)),
+                Limit.limit().offset(offset).count(count)
+        );
+    }
+
+    /**
+     * 添加元素到有序集合
+     * @param key 键
+     * @param member 元素
+     * @param score 分数
+     */
+    public void zAdd(String key, String member, double score) {
+        stringRedisTemplate.opsForZSet().add(key, member, score);
+    }
+
+    /**
+     * 添加元素到有序集合 addIfAbsent
+     * @param key 键
+     * @param member 元素
+     * @param score 分数
+     */
+    public void zAddNX(String key, String member, double score) {
+        stringRedisTemplate.opsForZSet().addIfAbsent(key, member, score);
+    }
+
+    /**
+     * 获取有序集合指定范围的元素
+     * @param key 键
+     * @param start 开始索引
+     * @param end 结束索引
+     * @return 元素列表
+     */
+    public Set<String> zRange(String key, long start, long end) {
+        return stringRedisTemplate.opsForZSet().range(key, start, end);
+    }
+
+    /**
+     * 替换热门标签
+     *
+     * @param args 参数
+     * @param key hotKey
+     */
+    public void replaceHotTags(String[] args, String key) {
+        String script =
+                "local key = KEYS[1]; " +
+                "redis.call('DEL', key); " +
+                "for i = 1, #ARGV, 2 do " +
+                "local score = tonumber(ARGV[i]); " +
+                "local member = ARGV[i + 1]; " +
+                "redis.call('ZADD', key, score, member); " +
+                "end;";
+
+        stringRedisTemplate.execute(
+                RedisScript.of(script, Void.class),
+                List.of(key),
+                (Object[]) args
+        );
     }
 }

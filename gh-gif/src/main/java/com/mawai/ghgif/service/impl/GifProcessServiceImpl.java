@@ -360,6 +360,7 @@ public class GifProcessServiceImpl implements GifProcessService {
             // 保存删除的文件到删除表中
             GifDelete gifDelete = new GifDelete();
             gifDelete.setFileUrl(gif.getFileUrl());
+            gifDelete.setFileId(fileId);
             gifDelete.setCreatedAt(LocalDateTime.now());
             gifDeleteService.save(gifDelete);
 

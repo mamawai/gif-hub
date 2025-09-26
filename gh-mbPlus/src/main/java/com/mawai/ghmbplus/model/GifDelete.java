@@ -47,6 +47,10 @@ public class GifDelete implements Serializable {
     @Schema(description = "GIF文件URL")
     private String fileUrl;
 
+    @TableField("file_Id")
+    @Schema(description = "文件ID")
+    private String fileId;
+
     /**
      * 创建时间
      */

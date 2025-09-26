@@ -6,6 +6,7 @@ import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.MessageService;
+import com.mawai.ghgif.util.PinYinUtils;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.GifTag;
@@ -39,9 +40,11 @@ public class GifMessageConsumer implements MessageConsumer {
     private final MessageService messageService;
     private final TagMapper tagMapper;
     private final GifTagService gifTagService;
+    private final PinYinUtils pinYinUtils;
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
     private static final String GIF_MSG = "gif:msg:";
     private static final String HANDLE_GIF_MSG_FAIL = "gif:msg:fail:";
+    private final static String TAG_KEY = "tag:";
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;
 
@@ -162,12 +165,16 @@ public class GifMessageConsumer implements MessageConsumer {
      * 使用数据库的INSERT ... ON DUPLICATE KEY UPDATE
      */
     private Tag findOrCreateTag(String tagName) {
-        Tag tag = new Tag().setName(tagName).setUseCount(1);
+        Tag tag = new Tag().setName(tagName);
         
         // insert...on duplicate key update
         int result = tagMapper.insertOrUpdateTag(tag);
         
         if (result > 0) {
+            // 存入缓存
+            cacheService.zAddNX(TAG_KEY + pinYinUtils.getPinyinEngine().getFirstLetter(tagName.charAt(0)),
+                    tagName, 0);
+
             // 操作成功，重新查询获取最新数据（包含正确的use_count和时间戳）
             Tag updatedTag = tagMapper.selectByName(tagName);
             if (updatedTag != null) {

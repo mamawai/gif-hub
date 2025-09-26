@@ -2,6 +2,7 @@ package com.mawai.ghgif.schedule;
 
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.amazonSQS.consumer.UserLikesConsumer;
 import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
@@ -9,13 +10,9 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
-import com.mawai.ghmbplus.model.Gif;
-import com.mawai.ghmbplus.model.GifDelete;
-import com.mawai.ghmbplus.model.GifDeleteFailed;
-import com.mawai.ghmbplus.model.UserLike;
-import com.mawai.ghmbplus.service.GifDeleteFailedService;
-import com.mawai.ghmbplus.service.GifDeleteService;
-import com.mawai.ghmbplus.service.GifService;
+import com.mawai.ghmbplus.dao.TagMapper;
+import com.mawai.ghmbplus.model.*;
+import com.mawai.ghmbplus.service.*;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +30,7 @@ import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 /**
  * Gif定时任务执行器
@@ -47,6 +45,8 @@ public class GifScheduleExecutorWithSQS {
     private final GifDeleteService gifDeleteService;
     private final GifDeleteFailedService gifDeleteFailedService;
     private final MessageService messageService;
+    private final TagMapper tagMapper;
+    private final GifTagService gifTagService;
 
     // 注入线程池
     private final Executor scheduledExecutor;
@@ -61,6 +61,7 @@ public class GifScheduleExecutorWithSQS {
     private static final String VIEW_COUNT_KEY = "gif:view:";
     private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:";
     private static final String USER_DISLIKE_KEY = "user:dislike:";
+    private final static String HOT_TAG_KEY = "hotTag";
 
     @Value("${aws.sqs.base-queue-url}")
     private String SQS_QUEUE_URL;
@@ -373,6 +374,29 @@ public class GifScheduleExecutorWithSQS {
         }
     }
 
+    /**
+     * 清理Tag表中使用次数为0的Tag数据 24小时执行一次
+     */
+    @Scheduled(fixedRate = 60 * 1000)
+    public void replaceHotTagsAndClearZeroTag() {
+        try {
+            List<Tag> hotTags = tagMapper.selectHotTags();
+            String[] args = new String[hotTags.size() * 2];
+            for (int i = 0; i < hotTags.size(); i++) {
+                Tag tag = hotTags.get(i);
+                args[i * 2] = String.valueOf(tag.getUseCount());
+                args[i * 2 + 1] = tag.getName();
+            }
+            cacheService.replaceHotTags(args, HOT_TAG_KEY);
+
+            // 删除使用次数为0的Tag数据 -- 删除gif时会删除gifTag，这里删除Tag先不删除gifTag
+            LambdaQueryWrapper<Tag> queryWrapper = new LambdaQueryWrapper<>();
+            tagMapper.delete(queryWrapper.eq(Tag::getUseCount, 0));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
      /**
      * 监听GifDeleteEvent事件，清理删除记录表中的数据 -- 删除R2层面的垃圾文件
      * 不加try-catch，避免异常回滚失败
@@ -408,11 +432,12 @@ public class GifScheduleExecutorWithSQS {
 
         // 准备批量删除对象
         List<ObjectIdentifier> objectsToDelete = new ArrayList<>();
+        List<String> gifTagsToDelete = new ArrayList<>();
         int failUrls = 0;
 
         // 收集要删除的对象标识符
-        for (GifDelete record : deleteRecords) {
-            String fileUrl = record.getFileUrl();
+        for (GifDelete gifDelete : deleteRecords) {
+            String fileUrl = gifDelete.getFileUrl();
             String objectKey = extractObjectKeyFromUrl(fileUrl);
 
             if (objectKey != null) {
@@ -425,6 +450,9 @@ public class GifScheduleExecutorWithSQS {
                 failUrls++;
                 log.error("无法从URL提取对象键: {}", fileUrl);
             }
+
+            // 收集要删除的gifTag关联
+            if (gifDelete.getFileId() != null) gifTagsToDelete.add(gifDelete.getFileId());
         }
 
         if (objectsToDelete.isEmpty()) {
@@ -451,11 +479,26 @@ public class GifScheduleExecutorWithSQS {
 
         // 如果有错误，收集失败的key
         if (deleteResponse.hasErrors() && !deleteResponse.errors().isEmpty()) {
-            deleteResponse.errors().forEach(error -> {
-                failedKeys.add("https://mynnmy.top/" + error.key());
-                log.error("删除对象失败: 键={}, 错误码={}, 消息={}",
-                    error.key(), error.code(), error.message());
-            });
+            deleteResponse.errors().forEach(
+                    error -> {
+                        failedKeys.add("https://mynnmy.top/" + error.key());
+                        log.error("删除对象失败: 键={}, 错误码={}, 消息={}",
+                                error.key(), error.code(), error.message());
+                    });
+        }
+
+        // 更新tag表和gifTag表
+        if (gifTagsToDelete.isEmpty()) {
+            log.info("没有有效的gifTag需要删除");
+        } else {
+            List<GifTag> gifTags = gifTagService.list(new LambdaQueryWrapper<GifTag>().in(GifTag::getGifId, gifTagsToDelete));
+            if (!gifTags.isEmpty()) {
+                Map<Long, Long> tagIdCountMap = gifTags.stream().collect(Collectors.groupingBy(GifTag::getTagId, Collectors.counting()));
+                // 删除gifTag关联
+                gifTagService.remove(new LambdaQueryWrapper<GifTag>().in(GifTag::getGifId, gifTagsToDelete));
+                // 更新tag表
+                tagMapper.updateUseCountByMap(tagIdCountMap);
+            }
         }
 
         // 记录删除结果
