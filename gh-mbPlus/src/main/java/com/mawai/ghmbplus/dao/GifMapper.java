@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 /**
  * <p>
  * GIF资源表 Mapper 接口
@@ -29,11 +31,17 @@ public interface GifMapper extends BaseMapper<Gif> {
      */
     Gif selectMinRandom();
 
-
     /**
      * 插入一条数据，并设置随机数
      * @param gif GIF记录
      * @return 插入的行数
      */
     int insertOneWithRandomValue(Gif gif);
+
+    /**
+     * 按ID列表批量查询GIF
+     * @param gifIds GIF ID列表
+     * @return GIF列表（按gifIds顺序返回）
+     */
+    List<Gif> selectGifsByIds(@Param("gifIds") List<Long> gifIds);
 }

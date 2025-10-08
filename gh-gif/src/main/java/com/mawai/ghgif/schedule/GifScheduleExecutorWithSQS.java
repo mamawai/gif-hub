@@ -375,9 +375,9 @@ public class GifScheduleExecutorWithSQS {
     }
 
     /**
-     * 清理Tag表中使用次数为0的Tag数据 24小时执行一次
+     * 清理Tag表中使用次数为0的Tag数据  每小时执行一次
      */
-    @Scheduled(fixedRate = 60 * 1000)
+    @Scheduled(fixedRate = 60 * 1000 * 60)
     public void replaceHotTagsAndClearZeroTag() {
         try {
             List<Tag> hotTags = tagMapper.selectHotTags();

@@ -5,8 +5,8 @@
     <select id="selectRandom" resultType="com.mawai.ghmbplus.model.Gif">
         select *
         from gif
-        where status = 1
-          and random_number >= #{randomValue}
+        where random_number >= #{randomValue}
+          and status = 1
         order by random_number
         limit 1
     </select>
@@ -14,8 +14,8 @@
     <select id="selectMinRandom" resultType="com.mawai.ghmbplus.model.Gif">
         select *
         from gif
-        where status = 1
-          and random_number = (select MIN(random_number) from gif)
+        where random_number = (select MIN(random_number) from gif)
+          and status = 1
         limit 1
     </select>
 
@@ -50,5 +50,16 @@
             #{downloadCount}
         )
     </insert>
+
+    <!-- 按ID列表批量查询 -->
+    <select id="selectGifsByIds" resultType="com.mawai.ghmbplus.model.Gif">
+        SELECT *
+        FROM gif
+        WHERE id IN
+        <foreach collection="gifIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        AND status = 1
+    </select>
 
 </mapper>
