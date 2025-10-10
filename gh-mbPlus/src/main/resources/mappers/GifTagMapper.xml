@@ -23,7 +23,7 @@
             </if>
         </where>
         ORDER BY g.created_at DESC, gt0.gif_id DESC
-        LIMIT #{count}
+        LIMIT #{pageSize}
     </select>
 
     <!-- 标签AND查询（按热度排序），支持单标签和多标签 -->
@@ -44,31 +44,7 @@
             </foreach>
         </where>
         ORDER BY g.like_count DESC, gt0.gif_id DESC
-        LIMIT #{offset}, #{count}
-    </select>
-
-    <!-- 标签AND查询（随机）- 游标分页，支持单标签和多标签 -->
-    <select id="selectGifIdsByTagsOrderByRandom" resultType="java.lang.Long">
-        SELECT gt0.gif_id
-        FROM gif_tag gt0
-        <foreach collection="tagIds" item="tagId" index="index" open="" separator="" close="">
-            <if test="index > 0">
-                INNER JOIN gif_tag gt${index} ON gt0.gif_id = gt${index}.gif_id AND gt${index}.tag_id = #{tagId}
-            </if>
-        </foreach>
-        INNER JOIN gif g ON gt0.gif_id = g.id
-        <where>
-            <foreach collection="tagIds" item="tagId" index="index" open="" separator="" close="">
-                <if test="index == 0">
-                    gt0.tag_id = #{tagId}
-                </if>
-            </foreach>
-            <if test="lastId != null and lastRandomNumber != null">
-                AND (g.random_number &gt; #{lastRandomNumber} OR (g.random_number = #{lastRandomNumber} AND gt0.gif_id &gt; #{lastId}))
-            </if>
-        </where>
-        ORDER BY g.random_number ASC, gt0.gif_id ASC
-        LIMIT #{count}
+        LIMIT #{offset}, #{pageSize}
     </select>
 
 </mapper>

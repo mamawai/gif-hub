@@ -44,4 +44,11 @@ public interface TagMapper extends BaseMapper<Tag> {
      * @return 最热门的标签列表
      */
     List<Tag> selectHotTags();
+
+    /**
+     * 根据标签名称查询标签ID
+     * @param tags 标签
+     * @return 标签列表
+     */
+    List<Long> selectIdsByNames(@Param("tags") List<String> tags);
 }

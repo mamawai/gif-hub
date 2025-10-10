@@ -113,8 +113,8 @@ public class GifController {
      * @return 更新结果
      */
     @Operation(summary = "更新查看次数", description = "更新查看次数")
-    @GetMapping("/view")
-    public ApiResponse<Boolean> updateViewCount(@RequestParam("fileId") String fileId) {
+    @GetMapping("/view/{fileId}")
+    public ApiResponse<Boolean> updateViewCount(@PathVariable String fileId) {
         try {
             boolean result = gifProcessService.updateViewCount(fileId);
             return ApiResponse.success(result);

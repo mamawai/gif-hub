@@ -32,4 +32,11 @@
         select name, use_count from tag force index (idx_use_count) order by use_count desc limit 20
     </select>
 
+    <select id="selectIdsByNames" resultType="java.lang.Long">
+        select id from tag where name in
+        <foreach item="name" collection="tags" separator="," open="(" close=")">
+            #{name}
+        </foreach>
+    </select>
+
 </mapper>

@@ -15,12 +15,7 @@ public enum TagGifSortType {
     /**
      * 按热度排序（like_count）
      */
-    HOT("hot"),
-    
-    /**
-     * 随机排序
-     */
-    RANDOM("random");
+    HOT("hot");
     
     private final String code;
     

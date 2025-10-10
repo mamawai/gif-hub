@@ -1,7 +1,6 @@
 package com.mawai.ghgif.service.impl;
 
 import cn.hutool.core.util.StrUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.constant.TagGifSortType;
 import com.mawai.ghgif.modelMapper.GifParamMapper;
@@ -10,6 +9,7 @@ import com.mawai.ghgif.util.PinYinUtils;
 import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.GifTagMapper;
+import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.Tag;
 import com.mawai.ghmbplus.service.TagService;
@@ -29,6 +29,7 @@ public class TagProcessServiceImpl implements TagProcessService {
     private final PinYinUtils pinYinUtils;
     private final CacheService cacheService;
     private final TagService tagService;
+    private final TagMapper tagMapper;
     private final GifTagMapper gifTagMapper;
     private final GifMapper gifMapper;
     private final GifParamMapper gifParamMapper;
@@ -89,37 +90,31 @@ public class TagProcessServiceImpl implements TagProcessService {
      * 获取标签对应的GIF列表（支持多标签AND查询）
      *
      * @param tags 标签列表（多个标签取交集）
-     * @param offset 偏移量（仅HOT排序使用）
-     * @param count 数量
+     * @param page 页码
+     * @param pageSize 每页数量
      * @param sortType 排序类型
      * @param lastId 最后一条记录的ID（TIME/RANDOM排序使用）
      * @param lastValue 最后一条记录的排序字段值（TIME/RANDOM排序使用）
      * @return GIF列表
      */
     @Override
-    public List<GifVO> getTagGifs(List<String> tags, int offset, int count, TagGifSortType sortType, Long lastId, String lastValue) {
-        if (tags == null || tags.isEmpty() || count <= 0) {
+    public List<GifVO> getTagGifs(List<String> tags, int page, int pageSize, TagGifSortType sortType, Long lastId, String lastValue) {
+        if (tags == null || tags.isEmpty() || pageSize <= 0) {
             return Collections.emptyList();
         }
 
         try {
             // 1. 查询所有标签ID
-            List<Tag> tagEntities = tagService.list(
-                    new LambdaQueryWrapper<Tag>().in(Tag::getName, tags)
-            );
+            List<Long> tagIds = tagMapper.selectIdsByNames(tags);
 
             // 如果有标签不存在，直接返回空（AND逻辑，缺一不可）
-            if (tagEntities.size() != tags.size()) {
-                log.info("部分标签不存在，查询标签: {}, 找到: {}", tags, tagEntities.size());
+            if (tagIds.size() != tags.size()) {
+                log.info("部分标签不存在，查询标签: {}, 找到: {}", tags, tagIds.size());
                 return Collections.emptyList();
             }
 
-            List<Long> tagIds = tagEntities.stream()
-                    .map(Tag::getId)
-                    .collect(Collectors.toList());
-
             // 2. 查询GIF ID列表
-            List<Long> gifIds = getGifIdsByTags(tagIds, offset, count, sortType, lastId, lastValue);
+            List<Long> gifIds = getGifIdsByTags(tagIds, page, pageSize, sortType, lastId, lastValue);
 
             if (gifIds.isEmpty()) {
                 return Collections.emptyList();
@@ -139,21 +134,19 @@ public class TagProcessServiceImpl implements TagProcessService {
     /**
      * 根据标签ID列表查询GIF ID列表（支持单标签和多标签）
      * @param tagIds 标签id列表
-     * @param offset 偏移量（仅HOT排序使用）
-     * @param count 数量
+     * @param page 页码
+     * @param pageSize 每页数量
      * @param sortType 排序类型
-     * @param lastId 最后一条记录的ID（TIME/RANDOM排序使用）
-     * @param lastValue 最后一条记录的排序字段值（TIME/RANDOM排序使用）
+     * @param lastId 最后一条记录的ID（TIME排序使用）
+     * @param lastValue 最后一条记录的排序字段值（TIME排序使用）
      * @return GIF ID列表
      */
-    private List<Long> getGifIdsByTags(List<Long> tagIds, int offset, int count, TagGifSortType sortType, Long lastId, String lastValue) {
+    private List<Long> getGifIdsByTags(List<Long> tagIds, int page, int pageSize, TagGifSortType sortType, Long lastId, String lastValue) {
         return switch (sortType) {
             case TIME -> gifTagMapper.selectGifIdsByTagsOrderByTime(
-                    tagIds, tagIds.size(), count, lastId, lastValue);
+                    tagIds, tagIds.size(), pageSize, lastId, lastValue);
             case HOT -> gifTagMapper.selectGifIdsByTagsOrderByHot(
-                    tagIds, tagIds.size(), offset, count);
-            case RANDOM -> gifTagMapper.selectGifIdsByTagsOrderByRandom(
-                    tagIds, tagIds.size(), count, lastId, lastValue);
+                    tagIds, tagIds.size(), pageSize * (page - 1), pageSize);
         };
     }
 

@@ -6,8 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 消息路由器
@@ -18,8 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class MessageRouter {
 
-    // 消息类型值到处理器的映射
-    private final Map<String, MessageConsumer> handlers = new ConcurrentHashMap<>();
+    // 消息类型值到处理器的映射 -- 注册处理器和获取处理器是分开的，所以不需要使用ConcurrentHashMap
+    private final Map<String, MessageConsumer> handlers = new HashMap<>();
 
     /**
      * 注册消息处理器

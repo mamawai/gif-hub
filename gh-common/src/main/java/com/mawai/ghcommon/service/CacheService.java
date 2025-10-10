@@ -285,14 +285,16 @@ public class CacheService {
      */
     public void increment(String key, long delta, long timeout, TimeUnit unit) {
         // 使用Lua脚本确保原子性操作
-        String scriptText = "local value = redis.call('INCRBY', KEYS[1], ARGV[1]); " +
-                        "redis.call('EXPIRE', KEYS[1], ARGV[2]); " +
-                        "return value;";
-        RedisScript<Long> script = RedisScript.of(scriptText, Long.class);
+        String scriptText = "redis.call('INCRBY', KEYS[1], ARGV[1]); " +
+                        "redis.call('EXPIRE', KEYS[1], ARGV[2]);";
 
-        // 使用Object数组传递参数 --- 真的坑啊 需要用Object传 TnT 改了一天
-        Object[] args = new Object[] {delta, unit.toSeconds(timeout)};
-        redisTemplate.execute(script, List.of(key), args);
+        // 使用stringRedisTemplate避免序列化问题，参数必须是字符串
+        stringRedisTemplate.execute(
+            RedisScript.of(scriptText, Void.class),
+            List.of(key),
+            String.valueOf(delta),
+            String.valueOf(unit.toSeconds(timeout))
+        );
     }
 
     /**
@@ -371,14 +373,15 @@ public class CacheService {
      */
     public void decrement(String key, long delta, long timeout, TimeUnit unit) {
         // 使用Lua脚本确保原子性操作
-        String scriptText = "local value = redis.call('DECRBY', KEYS[1], ARGV[1]); " +
-                        "redis.call('EXPIRE', KEYS[1], ARGV[2]); " +
-                        "return value;";
-        RedisScript<Long> script = RedisScript.of(scriptText, Long.class);
+        String scriptText = "redis.call('DECRBY', KEYS[1], ARGV[1]); " +
+                        "redis.call('EXPIRE', KEYS[1], ARGV[2]);";
         
-        // 使用Object数组传递参数
-        Object[] args = new Object[] {delta, unit.toSeconds(timeout)};
-        redisTemplate.execute(script, List.of(key), args);
+        stringRedisTemplate.execute(
+            RedisScript.of(scriptText, Void.class), 
+            List.of(key), 
+            String.valueOf(delta),
+            String.valueOf(unit.toSeconds(timeout))
+        );
     }   
     
     /**
@@ -540,7 +543,12 @@ public class CacheService {
             "        local value = redis.call('GET', keys[i]); " +
             "        if value and tonumber(value) ~= 0 then " +
             "            result[keys[i]] = tonumber(value); " +
-            "            redis.call('SET', keys[i], 0); " +
+            "            local ttl = redis.call('TTL', keys[i]); " + // 获取原来过期时间
+            "            if ttl ~= -1 then " + // 不为-1，则设置过期时间为原来过期时间ttl
+            "                redis.call('SET', keys[i], 0, 'EX', ttl); " +
+            "            else " + // 如果为-1，则不设置过期时间
+            "                redis.call('SET', keys[i], 0); " +
+            "            end " +
             "        end " +
             "    end " +
             "until cursor == '0'; " +

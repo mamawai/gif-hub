@@ -48,25 +48,26 @@ public class TagController {
 
     /**
      * 获取标签GIF列表（支持游标分页）
-     * @param tags 标签 最多5个
-     * @param offset 偏移量（仅HOT排序使用，其他排序传0）
-     * @param count 数量
-     * @param sortType 排序类型：TIME/HOT/RANDOM
-     * @param lastId 最后一条记录的ID（TIME/RANDOM排序使用，首次查询传null或0）
-     * @param lastValue 最后一条记录的排序字段值（TIME传created_at，RANDOM传random_number，首次查询传null）
+     * @param tagStr 标签 最多4个
+     * @param page 页码
+     * @param pageSize 每页数量
+     * @param sortType 排序类型：TIME/HOT
+     * @param lastId 最后一条记录的ID（TIME排序使用，首次查询不传默认null）
+     * @param lastValue 最后一条记录的排序字段值（TIME传created_at，首次查询不传默认null）
      * @return gif列表
      */
-    @Operation(summary = "获取标签GIF列表", description = "获取标签GIF列表，支持TIME/RANDOM游标分页，HOT使用offset分页")
+    @Operation(summary = "获取标签GIF列表", description = "获取标签GIF列表，TIME使用游标分页，HOT使用page分页")
     @GetMapping(value = {"/tagGifs"})
-    public ApiResponse<List<GifVO>> tagGifs(@RequestParam("tags") List<String> tags,
-                                            @RequestParam(value = "offset", defaultValue = "0") int offset,
-                                            @RequestParam(value = "count", defaultValue = "10") int count,
+    public ApiResponse<List<GifVO>> tagGifs(@RequestParam("tagStr") String tagStr,
+                                            @RequestParam(value = "page", defaultValue = "0") int page,
+                                            @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
                                             @RequestParam("sortType") String sortType,
                                             @RequestParam(value = "lastId", required = false) Long lastId,
                                             @RequestParam(value = "lastValue", required = false) String lastValue) {
         try {
+            List<String> tags = List.of(tagStr.split(","));
             if (tags.size() > 5) return ApiResponse.error(500, "最多支持5个标签");
-            List<GifVO> gifVOList = tagProcessService.getTagGifs(tags, offset, count, TagGifSortType.fromCode(sortType), lastId, lastValue);
+            List<GifVO> gifVOList = tagProcessService.getTagGifs(tags, page, pageSize, TagGifSortType.fromCode(sortType), lastId, lastValue);
             return ApiResponse.success(gifVOList, "success:");
         } catch (Exception e) {
             return ApiResponse.error(500, "获取标签gif列表失败：" + e.getMessage());
