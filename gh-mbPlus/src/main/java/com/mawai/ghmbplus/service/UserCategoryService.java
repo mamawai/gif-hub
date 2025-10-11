@@ -13,4 +13,11 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface UserCategoryService extends IService<UserCategory> {
 
+    /**
+     * 判断用户是否已经有一个同名的分类
+     * @param userId 用户ID
+     * @param categoryName 分类名称
+     * @return 是否已经有一个同名的分类
+     */
+    boolean existsByUserIdAndCategoryName(Long userId, String categoryName);
 }

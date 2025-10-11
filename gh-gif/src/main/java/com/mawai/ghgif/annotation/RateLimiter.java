@@ -37,5 +37,13 @@ public @interface RateLimiter {
      * @return 限流器类型
      */
     RateLimiterType type();
+    
+    /**
+     * 业务key的参数名（可选，用于实现针对特定业务对象的限流）
+     * 当指定此参数时，会从方法参数中提取对应的值作为限流key的一部分
+     * 例如：指定为"fileId"时，限流key会变成 limiter:VIEW:userId:fileId
+     * @return 参数名，默认为空字符串表示不使用业务key
+     */
+    String businessKeyParamName() default "";
 }
 

@@ -144,15 +144,15 @@ public class GifMessageConsumer implements MessageConsumer {
     private void saveGifTags(Long gifId, List<String> tags) {
         for (String tagName : tags) {
             // 1. 查找或创建Tag
-            Tag tag = findOrCreateTag(tagName);
+            Long tagId = findOrCreateTag(tagName);
 
             // 如果tag处理失败，则跳过该tag
-            if (tag == null) continue;
+            if (tagId == null) continue;
             
             // 2. 创建GifTag关联
             GifTag gifTag = new GifTag()
                 .setGifId(gifId)
-                .setTagId(tag.getId());
+                .setTagId(tagId);
 
             if (!gifTagService.save(gifTag)) {
                 throw new RuntimeException("保存GIF标签关联失败");
@@ -165,7 +165,7 @@ public class GifMessageConsumer implements MessageConsumer {
      * 查找或创建标签
      * 使用数据库的INSERT ... ON DUPLICATE KEY UPDATE
      */
-    private Tag findOrCreateTag(String tagName) {
+    private Long findOrCreateTag(String tagName) {
         Tag tag = new Tag().setName(tagName);
         
         // insert...on duplicate key update
@@ -176,10 +176,10 @@ public class GifMessageConsumer implements MessageConsumer {
             cacheService.zAddNX(TAG_KEY + pinYinUtils.getPinyinEngine().getFirstLetter(tagName.charAt(0)),
                     tagName, 0);
 
-            // 操作成功，重新查询获取最新数据（包含正确的use_count和时间戳）
-            Tag updatedTag = tagMapper.selectByName(tagName);
-            if (updatedTag != null) {
-                return updatedTag;
+            // 操作成功，重新查询获取tagId
+            Long tagId  = tagMapper.selectByName(tagName);
+            if (tagId != null && tagId > 0) {
+                return tagId;
             } else {
                 log.error("操作成功，但是查询标签失败 {}", tagName);
                 return null; // 影响不是很大直接返回null 不处理这个标签

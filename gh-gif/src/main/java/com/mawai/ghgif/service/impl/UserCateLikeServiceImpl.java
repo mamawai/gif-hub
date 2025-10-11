@@ -32,11 +32,7 @@ public class UserCateLikeServiceImpl implements UserCateLikeService {
             Long userId = StpUtil.getLoginIdAsLong();
             
             // 检查该用户是否已经有同名的分类
-            LambdaQueryWrapper<UserCategory> queryWrapper = new LambdaQueryWrapper<>();
-            queryWrapper.eq(UserCategory::getUserId, userId)
-                        .eq(UserCategory::getCategoryName, categoryName);
-            
-            if (userCategoryService.count(queryWrapper) > 0) {
+            if (userCategoryService.existsByUserIdAndCategoryName(userId, categoryName)) {
                 log.warn("用户 {} 尝试创建重复的分类: {}", userId, categoryName);
                 return false;
             }

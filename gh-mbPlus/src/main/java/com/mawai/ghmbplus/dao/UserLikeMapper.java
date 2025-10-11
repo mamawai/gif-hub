@@ -27,4 +27,14 @@ public interface UserLikeMapper extends BaseMapper<UserLike> {
      * @return 影响的行数
      */
     int insertOrUpdateBatchByUniqueKey(@Param("list") List<UserLike> userLikes);
+
+    /**
+     * 判断用户是否点赞了某个GIF
+     * 利用 uk_user_gif(user_id, gif_id) 唯一索引，只查询索引不回表
+     * 
+     * @param userId 用户ID
+     * @param gifId GIF ID
+     * @return 存在返回true，不存在返回false
+     */
+    boolean existsByUserIdAndGifId(@Param("userId") Long userId, @Param("gifId") Long gifId);
 }

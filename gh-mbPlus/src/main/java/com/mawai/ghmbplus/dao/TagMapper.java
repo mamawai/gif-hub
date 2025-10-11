@@ -31,7 +31,7 @@ public interface TagMapper extends BaseMapper<Tag> {
      * @param name 标签名称
      * @return 标签对象
      */
-    Tag selectByName(@Param("name") String name);
+    Long selectByName(@Param("name") String name);
 
     /**
      * 根据标签ID更新使用次数

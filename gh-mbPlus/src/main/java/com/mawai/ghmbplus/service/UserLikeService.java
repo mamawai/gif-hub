@@ -23,4 +23,13 @@ public interface UserLikeService extends IService<UserLike> {
      * @param userLikes 用户点赞记录列表
      */
     void insertOrUpdateBatchByUniqueKey(List<UserLike> userLikes);
+
+    /**
+     * 判断用户是否点赞了某个GIF
+     * 
+     * @param userId 用户ID
+     * @param gifId GIF ID
+     * @return 存在返回true，不存在返回false
+     */
+    boolean existsByUserIdAndGifId(Long userId, Long gifId);
 }

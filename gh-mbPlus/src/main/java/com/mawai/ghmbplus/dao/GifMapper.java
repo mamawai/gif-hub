@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * <p>
@@ -39,9 +40,30 @@ public interface GifMapper extends BaseMapper<Gif> {
     int insertOneWithRandomValue(Gif gif);
 
     /**
-     * 按ID列表批量查询GIF
+     * 按ID列表批量查询GIF  
      * @param gifIds GIF ID列表
      * @return GIF列表（按gifIds顺序返回）
      */
     List<Gif> selectGifsByIds(@Param("gifIds") List<Long> gifIds);
+
+    /**
+     * 批量更新查看数 by map
+     * @param incrementMap gifId -> viewCount
+     * @return 更新的行数
+     */
+    int updateViewCountBatchByMap(@Param("incrementMap") Map<Long, Long> incrementMap);
+
+    /**
+     * 批量更新下载数 by map
+     * @param incrementMap gifId -> downloadCount
+     * @return 更新的行数
+     */
+    int updateDownloadCountBatchByMap(@Param("incrementMap") Map<Long, Long> incrementMap);
+
+    /**
+     * 批量更新点赞数 by map
+     * @param incrementMap gifId -> likeCount
+     * @return 更新的行数
+     */
+    int updateLikeCountBatchByMap(@Param("incrementMap") Map<Long, Long> incrementMap);
 }

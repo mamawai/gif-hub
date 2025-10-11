@@ -24,8 +24,8 @@
         </foreach>
     </update>
 
-    <select id="selectByName" parameterType="string" resultType="com.mawai.ghmbplus.model.Tag">
-        SELECT * FROM tag WHERE name = #{name}
+    <select id="selectByName" parameterType="string" resultType="java.lang.Long">
+        SELECT id FROM tag WHERE name = #{name}
     </select>
 
     <select id="selectHotTags" resultType="com.mawai.ghmbplus.model.Tag">

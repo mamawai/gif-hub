@@ -12,4 +12,12 @@
         ON DUPLICATE KEY UPDATE user_like_category_id = VALUES(user_like_category_id)
     </insert>
 
+    <!-- 判断用户是否点赞了某个GIF -->
+    <select id="existsByUserIdAndGifId" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1 FROM user_like 
+            WHERE user_id = #{userId} AND gif_id = #{gifId}
+        )
+    </select>
+
 </mapper>

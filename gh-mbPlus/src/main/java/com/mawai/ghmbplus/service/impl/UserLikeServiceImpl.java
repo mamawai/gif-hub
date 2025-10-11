@@ -6,7 +6,6 @@ import com.mawai.ghmbplus.service.UserLikeService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -31,6 +30,16 @@ public class UserLikeServiceImpl extends ServiceImpl<UserLikeMapper, UserLike> i
             this.baseMapper.insertOrUpdateBatchByUniqueKey(userLikes);
         } catch (Exception e) {
             log.error("批量插入或更新用户点赞记录失败: {}", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public boolean existsByUserIdAndGifId(Long userId, Long gifId) {
+        try {
+            return this.baseMapper.existsByUserIdAndGifId(userId, gifId);
+        } catch (Exception e) {
+            log.error("判断用户是否点赞了某个GIF失败: {}", e.getMessage(), e);
+            return false;
         }
     }
 }

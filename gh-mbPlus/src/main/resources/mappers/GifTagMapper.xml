@@ -21,6 +21,7 @@
             <if test="lastId != null and lastCreatedAt != null">
                 AND (g.created_at &lt; #{lastCreatedAt} OR (g.created_at = #{lastCreatedAt} AND gt0.gif_id &lt; #{lastId}))
             </if>
+            AND g.status = 1
         </where>
         ORDER BY g.created_at DESC, gt0.gif_id DESC
         LIMIT #{pageSize}
@@ -42,6 +43,7 @@
                     gt0.tag_id = #{tagId}
                 </if>
             </foreach>
+            AND g.status = 1
         </where>
         ORDER BY g.like_count DESC, gt0.gif_id DESC
         LIMIT #{offset}, #{pageSize}

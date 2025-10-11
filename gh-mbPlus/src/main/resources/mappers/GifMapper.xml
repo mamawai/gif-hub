@@ -2,8 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.mawai.ghmbplus.dao.GifMapper">
 
+    <sql id="Base_Column_List">
+        id, user_id, random_number, title, description,
+        file_url, status, view_count, like_count, download_count, created_at
+    </sql>
+
     <select id="selectRandom" resultType="com.mawai.ghmbplus.model.Gif">
-        select *
+        select
+            <include refid="Base_Column_List" />
         from gif
         where random_number >= #{randomValue}
           and status = 1
@@ -12,7 +18,8 @@
     </select>
 
     <select id="selectMinRandom" resultType="com.mawai.ghmbplus.model.Gif">
-        select *
+        select
+            <include refid="Base_Column_List" />
         from gif
         where random_number = (select MIN(random_number) from gif)
           and status = 1
@@ -27,9 +34,6 @@
             description,
             file_url,
             file_size,
-            width,
-            height,
-            duration,
             status,
             view_count,
             like_count,
@@ -41,9 +45,6 @@
             #{description},
             #{fileUrl},
             #{fileSize},
-            #{width},
-            #{height},
-            #{duration},
             #{status},
             #{viewCount},
             #{likeCount},
@@ -53,7 +54,8 @@
 
     <!-- 按ID列表批量查询 -->
     <select id="selectGifsByIds" resultType="com.mawai.ghmbplus.model.Gif">
-        SELECT *
+        SELECT
+            <include refid="Base_Column_List" />
         FROM gif
         WHERE id IN
         <foreach collection="gifIds" item="id" open="(" separator="," close=")">
@@ -61,5 +63,53 @@
         </foreach>
         AND status = 1
     </select>
+    
+    <!-- 批量更新查看数 by map -->
+    <update id="updateViewCountBatchByMap">
+        UPDATE gif
+        SET view_count = view_count + CASE id
+            <foreach collection="incrementMap" item="viewCount" index="gifId" separator=" ">
+                WHEN #{gifId} THEN #{viewCount}
+            </foreach>
+        END,
+        updated_at = NOW()
+        WHERE id IN
+        <foreach collection="incrementMap.keys" item="gifId" open="(" separator="," close=")">
+            #{gifId}
+        </foreach>
+        AND status = 1
+    </update>
+
+    <!-- 批量更新下载数 by map -->
+    <update id="updateDownloadCountBatchByMap">
+        UPDATE gif
+        SET download_count = download_count + CASE id
+            <foreach collection="incrementMap" item="downloadCount" index="gifId" separator=" ">
+                WHEN #{gifId} THEN #{downloadCount}
+            </foreach>
+        END,
+        updated_at = NOW()
+        WHERE id IN
+        <foreach collection="incrementMap.keys" item="gifId" open="(" separator="," close=")">
+            #{gifId}
+        </foreach>
+        AND status = 1
+    </update>
+
+    <!-- 批量更新点赞数 by map -->
+    <update id="updateLikeCountBatchByMap">
+        UPDATE gif
+        SET like_count = like_count + CASE id
+            <foreach collection="incrementMap" item="likeCount" index="gifId" separator=" ">
+                WHEN #{gifId} THEN #{likeCount}
+            </foreach>
+        END,
+        updated_at = NOW()
+        WHERE id IN
+        <foreach collection="incrementMap.keys" item="gifId" open="(" separator="," close=")">
+            #{gifId}
+        </foreach>
+        AND status = 1
+    </update>
 
 </mapper>

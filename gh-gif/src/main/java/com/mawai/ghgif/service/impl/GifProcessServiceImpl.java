@@ -576,6 +576,9 @@ public class GifProcessServiceImpl implements GifProcessService {
                        .eq(UserLike::getUserLikeCategoryId, categoryId)
                        .select(UserLike::getGifId); // 只查询gif ID字段
             
+            // 查询用户喜欢列表
+            List<UserLike> userLikes = userLikeService.list(queryWrapper);
+
             // 如果有不喜欢的gif ID，排除它们
             if (!dislikedGifIds.isEmpty()) {
                 // 将String类型的gif ID转换为Long类型
@@ -583,13 +586,14 @@ public class GifProcessServiceImpl implements GifProcessService {
                         .map(Long::parseLong)
                         .collect(Collectors.toSet());
                 
-                if (!dislikedGifIdsLong.isEmpty()) {
-                    queryWrapper.notIn(UserLike::getGifId, dislikedGifIdsLong);
-                }
+                // 排除不喜欢的gif ID 并返回
+                return userLikes.stream()
+                    .map(UserLike::getGifId)
+                    .filter(gifId -> !dislikedGifIdsLong.contains(gifId)) // 避免了NOT IN
+                    .collect(Collectors.toSet());
             }
             
-            List<UserLike> userLikes = userLikeService.list(queryWrapper);
-
+            // 返回用户喜欢列表
             return userLikes.stream()
                     .map(UserLike::getGifId)
                     .collect(Collectors.toSet());
@@ -655,11 +659,7 @@ public class GifProcessServiceImpl implements GifProcessService {
 
         if (!cacheService.hasKey(userLikeCategoryKey) && !cacheService.hasKey(userDislikeKey)) {
             // 如果没有 userLikeCategoryKey 或者 userDislikeKey 直接查数据库
-            return userLikeService.getOne(
-                    new LambdaQueryWrapper<UserLike>()
-                            .eq(UserLike::getUserId, userId)
-                            .eq(UserLike::getGifId, fileId)
-            ) != null;
+            return userLikeService.existsByUserIdAndGifId(userId, Long.parseLong(fileId));
         }
 
         Map<String, Long> likeCategoryHash = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey, false);
@@ -679,11 +679,7 @@ public class GifProcessServiceImpl implements GifProcessService {
             } else if (oldDisLikeSet.contains(fileId)) {
                 return false;
             } else {
-                return userLikeService.getOne(
-                    new LambdaQueryWrapper<UserLike>()
-                            .eq(UserLike::getUserId, userId)
-                            .eq(UserLike::getGifId, fileId)
-                ) != null;
+                return userLikeService.existsByUserIdAndGifId(userId, Long.parseLong(fileId));
             }
         }
     }
@@ -755,7 +751,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @return 是否更新成功
      */
     @Override
-    @RateLimiter(permitsPerSecond = (3 / 60.0), bucketCapacity = 3, message = "更新查看次数频繁", type = RateLimiterType.VIEW)
+    @RateLimiter(permitsPerSecond = (3 / 60.0), bucketCapacity = 3, message = "更新查看次数频繁", type = RateLimiterType.VIEW, businessKeyParamName = "fileId")
     public boolean updateViewCount(String fileId) {
         // 查看次数+1 并设置过期时间
         cacheService.increment(VIEW_COUNT_KEY + fileId, 1, EXPIRE_TIME, TimeUnit.MINUTES);

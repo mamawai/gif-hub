@@ -5,6 +5,7 @@ import com.mawai.ghmbplus.dao.UserCategoryMapper;
 import com.mawai.ghmbplus.service.UserCategoryService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * <p>
@@ -14,7 +15,17 @@ import org.springframework.stereotype.Service;
  * @author mawai
  * @since 2025-07-14
  */
+@Slf4j
 @Service
 public class UserCategoryServiceImpl extends ServiceImpl<UserCategoryMapper, UserCategory> implements UserCategoryService {
 
+    @Override
+    public boolean existsByUserIdAndCategoryName(Long userId, String categoryName) {
+        try {
+            return this.baseMapper.existsByUserIdAndCategoryName(userId, categoryName);
+        } catch (Exception e) {
+            log.error("判断用户是否已经有一个同名的分类失败: {}", e.getMessage(), e);
+            return false;
+        }
+    }
 }

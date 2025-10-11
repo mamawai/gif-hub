@@ -10,6 +10,7 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
+import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.*;
 import com.mawai.ghmbplus.service.*;
@@ -41,7 +42,7 @@ import java.util.stream.Collectors;
 public class GifScheduleExecutorWithSQS {
 
     private final CacheService cacheService;
-    private final GifService gifService;
+    private final GifMapper gifMapper;
     private final GifDeleteService gifDeleteService;
     private final GifDeleteFailedService gifDeleteFailedService;
     private final MessageService messageService;
@@ -74,19 +75,20 @@ public class GifScheduleExecutorWithSQS {
      * 
      * <ul>
      *   <li>同步GIF下载次数到数据库（{@link #syncDownloadCountToDatabase()}）</li>
+     *   <li>同步GIF查看次数到数据库（{@link #syncViewCountsToDatabase()}）</li>
      *   <li>同步GIF点赞计数到数据库（{@link #syncLikeCountsToDatabase()}）</li>
      *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabaseConcurrent()}）</li>
      * </ul>
      * 
-     * <p>任务执行过程记录完整日志，包括开始、完成和异常信息。</p>
-     * 
+     * @see #syncDownloadCountToDatabase() 下载数据同步实现
+     * @see #syncViewCountsToDatabase() 查看数据同步实现
      * @see #syncLikeCountsToDatabase() 点赞数据同步实现
      * @see #syncUserLikesToDatabaseConcurrent() () 用户喜欢记录同步实现
      * @see CacheService#getKeysWithPattern(String) 获取符合模式的Redis键
      */
     @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 转换为毫秒
     public void syncGifLikeCount() {
-        log.info("开始同步Redis中的GIF点赞数据到数据库...");
+        log.info("开始同步方法...");
         // 使用CompletableFuture并发执行，不等待完成
         CompletableFuture
             .runAsync(this::syncDownloadCountToDatabase, scheduledExecutor)
@@ -136,7 +138,8 @@ public class GifScheduleExecutorWithSQS {
             log.info("发现{}个GIF下载记录需要同步", nonZeroCounters.size());
             int prefixLength = DOWNLOAD_COUNT_KEY.length();
 
-            List<Gif> gifsToUpdate = new ArrayList<>();
+            // gifId -> downloadCount
+            Map<Long, Long> incrementMap = new HashMap<>();
             
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
                 String countKey = entry.getKey();
@@ -145,34 +148,27 @@ public class GifScheduleExecutorWithSQS {
                 try {
                     // 提取ID - 使用前缀长度直接获取
                     if (countKey.length() <= prefixLength) {
-                        log.warn("无效的键格式: {}", countKey);
+                        log.warn("downloadCount无效的键格式: {}", countKey);
                         continue;
                     }
                     String gifId = countKey.substring(prefixLength);
 
                     if (downloadCount != null && downloadCount > 0) {
-                        // 查询GIF记录
-                        Gif gif = gifService.getById(gifId);
-                        if (gif != null) {
-                            // 增加下载次数（增量更新）
-                            int newDownloadCount = gif.getDownloadCount() + downloadCount.intValue();
-                            gif.setDownloadCount(newDownloadCount);
-                            gif.setUpdatedAt(LocalDateTime.now());
-                            gifsToUpdate.add(gif);
-                            log.debug("准备更新GIF(ID:{})下载数增量: +{}, 新总数: {}", gifId, downloadCount, newDownloadCount);
-                        }
-                    }
-                    
+                        incrementMap.put(Long.parseLong(gifId), downloadCount);
+                    }                    
                 } catch (Exception e) { 
                     log.error("处理下载键失败: {}, 错误: {}", countKey, e.getMessage());
                 }
             }
 
-            // 处理剩余记录
-            if (!gifsToUpdate.isEmpty()) {
-                gifService.updateBatchById(gifsToUpdate);
-                log.info("已批量更新剩余的{}个GIF下载数", gifsToUpdate.size());
+            if (incrementMap.isEmpty()) {
+                return;
             }
+
+            // 统一处理
+            int updatedCount = gifMapper.updateDownloadCountBatchByMap(incrementMap);
+
+            log.info("已批量更新{}个GIF的downloadCount, 计划更新{}个, 相差{}个", updatedCount, incrementMap.size(), incrementMap.size() - updatedCount);
         } catch (Exception e) {
             log.error("同步下载次数失败: {}", e.getMessage(), e);
         }
@@ -195,42 +191,36 @@ public class GifScheduleExecutorWithSQS {
             log.info("发现{}个GIF查看记录需要同步", nonZeroCounters.size());
             int prefixLength = VIEW_COUNT_KEY.length();
 
-            List<Gif> gifsToUpdate = new ArrayList<>();
-
+            // gifId -> viewCount
+            Map<Long, Long> incrementMap = new HashMap<>();
+            
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
                 String countKey = entry.getKey();
                 Long viewCount = entry.getValue();
 
                 try {
-                    // 提取ID - 使用前缀长度直接获取
                     if (countKey.length() <= prefixLength) {
-                        log.info("无效的键格式: {}", countKey);
+                        log.warn("viewCount无效的键格式: {}", countKey);
                         continue;
                     }
                     String gifId = countKey.substring(prefixLength);
 
                     if (viewCount != null && viewCount != 0) {
-                        // 查询GIF记录
-                        Gif gif = gifService.getById(gifId);
-                        if (gif != null) {
-                            // 增加查看数（增量更新）
-                            int newViewCount = gif.getViewCount() + viewCount.intValue();
-                            gif.setViewCount(newViewCount);
-                            gif.setUpdatedAt(LocalDateTime.now());
-                            gifsToUpdate.add(gif);
-                            log.info("准备更新GIF(ID:{})查看数增量: {}, 新总数: {}", gifId, viewCount, newViewCount);
-                        }
+                        incrementMap.put(Long.parseLong(gifId), viewCount);
                     }
                 } catch (Exception e) {
                     log.error("处理查看键失败: {}, 错误: {}", countKey, e.getMessage());
                 }
             }
 
-            // 处理剩余记录
-            if (!gifsToUpdate.isEmpty()) {
-                gifService.updateBatchById(gifsToUpdate);
-                log.info("已批量更新剩余的{}个GIF查看数", gifsToUpdate.size());
+            if (incrementMap.isEmpty()) {
+                return;
             }
+
+            // 统一处理
+            int updatedCount = gifMapper.updateViewCountBatchByMap(incrementMap);
+
+            log.info("已批量更新{}个GIF的viewCount, 计划更新{}个, 相差{}个", updatedCount, incrementMap.size(), incrementMap.size() - updatedCount);
         } catch (Exception e) {
             log.error("同步GIF查看数数据失败: {}", e.getMessage(), e);
         }
@@ -246,13 +236,10 @@ public class GifScheduleExecutorWithSQS {
      *   <li>扫描匹配的key + 过滤非零值 + 获取值 + 重置为0</li>
      *   <li>提取每个键中的GIF ID</li>
      *   <li>获取点赞计数并原子性地重置Redis计数</li>
-     *   <li>查询对应GIF记录并增加点赞数（增量更新）</li>
-     *   <li>批量更新数据库（默认每1000条记录一批）</li>
+     *   <li>批量更新数据库</li>
      * </ol>
      *
      * 由于重置为0到db更新这段时间查询会不一致，所以先把db更新放在这里先不用SQS
-     * 
-     * <p>整个过程有完整的日志记录，包括同步数量和异常处理。</p>
      */
     private void syncLikeCountsToDatabase() {
         try {
@@ -267,7 +254,8 @@ public class GifScheduleExecutorWithSQS {
             log.info("发现{}个GIF点赞和取消点赞记录需要同步", nonZeroCounters.size());
             int prefixLength = LIKE_COUNT_KEY.length();
 
-            List<Gif> gifsToUpdate = new ArrayList<>();
+            // gifId -> likeCount
+            Map<Long, Long> incrementMap = new HashMap<>();
 
             // 先串行处理如果耗时过长考虑并发处理 -- ForkJoinPool + ConcurrentLinkedDeque
             for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
@@ -277,38 +265,31 @@ public class GifScheduleExecutorWithSQS {
                 try {
                     // 提取ID - 使用前缀长度直接获取
                     if (countKey.length() <= prefixLength) {
-                        log.info("无效的键格式: {}", countKey);
+                        log.warn("likeCount无效的键格式: {}", countKey);
                         continue;
                     }
                     String gifId = countKey.substring(prefixLength);
                     
                     if (likeCount != null && likeCount != 0) {
-                        // 查询GIF记录
-                        Gif gif = gifService.getById(gifId);
-                        if (gif != null) {
-                            // 增加点赞数（增量更新）
-                            int newLikeCount = gif.getLikeCount() + likeCount.intValue();
-                            gif.setLikeCount(newLikeCount);
-                            gif.setUpdatedAt(LocalDateTime.now());
-                            gifsToUpdate.add(gif);
-                            log.info("准备更新GIF(ID:{})点赞数增量: {}, 新总数: {}", gifId, likeCount, newLikeCount);
-                        }
+                        incrementMap.put(Long.parseLong(gifId), likeCount);
                     }
                 } catch (Exception e) {
                     log.error("处理点赞键失败: {}, 错误: {}", countKey, e.getMessage());
                 }
             }
-            
-            // 统一处理
-            if (!gifsToUpdate.isEmpty()) {
-                gifService.updateBatchById(gifsToUpdate);
-                log.info("已批量更新{}个GIF点赞数", gifsToUpdate.size());
+
+            if (incrementMap.isEmpty()) {
+                return;
             }
+
+            // 统一处理
+            int updatedCount = gifMapper.updateLikeCountBatchByMap(incrementMap);
+
+            log.info("已批量更新{}个GIF点赞数, 计划更新{}个, 相差{}个", updatedCount, incrementMap.size(), incrementMap.size() - updatedCount);
         } catch (Exception e) {
             log.error("同步GIF点赞数据失败: {}", e.getMessage(), e);
         }
     }
-
     
     /**
      * 同步用户喜欢记录到数据库 - 异步SQS版本（生产者角色）
