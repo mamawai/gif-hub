@@ -23,6 +23,10 @@ public class GifAuditController {
     
     /**
      * 获取待审核GIF列表
+     *
+     * @param page 页码，默认1
+     * @param pageSize 每页数量，默认10
+     * @return 待审核GIF列表
      */
     @Operation(summary = "获取待审核GIF列表", description = "分页获取待审核的GIF列表")
     @GetMapping("/pending")
@@ -35,6 +39,10 @@ public class GifAuditController {
     
     /**
      * 审核GIF
+     *
+     * @param id GIF审核记录ID
+     * @param status 审核状态
+     * @return 审核结果
      */
     @Operation(summary = "审核GIF", description = "通过或拒绝GIF")
     @PostMapping("/process/{id}")
@@ -47,6 +55,8 @@ public class GifAuditController {
 
     /**
      * 批量删除下架的GIF
+     *
+     * @return 删除结果
      */
     @Operation(summary = "批量删除审核记录以及下架的GIF", description = "批量删除下架的GIF")
     @DeleteMapping("/deleteBatch")

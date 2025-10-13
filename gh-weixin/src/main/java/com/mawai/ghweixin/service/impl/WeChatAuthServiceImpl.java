@@ -68,6 +68,12 @@ public class WeChatAuthServiceImpl implements WeChatAuthService {
                 .build();
     }
 
+    /**
+     * 通过微信授权code获取openId
+     *
+     * @param code 微信授权code
+     * @return 用户openId
+     */
     private String getOpenId(String code) {
         HashMap<String, String> params = new HashMap<>();
         params.put("appid", WECHAT_APP_ID);

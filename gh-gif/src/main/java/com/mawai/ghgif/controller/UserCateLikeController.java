@@ -21,7 +21,8 @@ public class UserCateLikeController {
     private final UserCateLikeService userCateLikeService;
 
     /**
-     * 用户喜欢分类表新增
+     * 新增用户喜欢分类
+     *
      * @param categoryName 分类名称
      * @return 新增结果
      */
@@ -37,7 +38,8 @@ public class UserCateLikeController {
     }
 
     /**
-     * 用户喜欢分类表删除
+     * 删除用户喜欢分类
+     *
      * @param categoryId 分类ID
      * @return 删除结果
      */
@@ -53,9 +55,10 @@ public class UserCateLikeController {
     } 
 
     /**
-     * 用户喜欢分类表修改
+     * 修改用户喜欢分类
+     *
      * @param categoryId 分类ID
-     * @param categoryName 分类名称
+     * @param categoryName 新的分类名称
      * @return 修改结果
      */
     @Operation(summary = "用户喜欢分类表修改", description = "用户喜欢分类表修改")
@@ -70,7 +73,8 @@ public class UserCateLikeController {
     }
 
     /**
-     * 用户喜欢分类表查询
+     * 查询当前用户的喜欢分类列表
+     *
      * @return 分类列表
      */
     @Operation(summary = "用户喜欢分类表查询", description = "用户喜欢分类表查询")

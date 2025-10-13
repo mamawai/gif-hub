@@ -20,25 +20,24 @@ public class TagController {
 
     /**
      * 前缀查找标签
-     * 根据指定的前缀内容进行标签搜索，支持分页功能
      *
-     * @param content 要搜索的标签前缀内容
-     * @param offset 分页偏移量，从第几个结果开始返回
-     * @param count 返回结果数量，限制本次查询返回的标签数量
-     * @return 包含匹配标签列表的API响应对象
+     * @param content 标签前缀内容
+     * @param pageNum 页码
+     * @param pageSize 每页数量
+     * @return 匹配的标签列表
      */
     @Operation(summary = "前缀查找标签", description = "前缀查找标签")
     @GetMapping("/prefix")
     public ApiResponse<List<String>> prefixSearch(@RequestParam("content") String content,
-                                                  @RequestParam("offset") int offset,
-                                                  @RequestParam("count") int count) {
-        return ApiResponse.success(tagProcessService.prefixSearch(content, offset, count));
+                                                  @RequestParam("pageNum") int pageNum,
+                                                  @RequestParam("pageSize") int pageSize) {
+        return ApiResponse.success(tagProcessService.prefixSearch(content, pageNum, pageSize));
     }
 
     /**
-     * 返回前20个最热门的标签
+     * 查询前20个热门标签
      *
-     * @return 20个最热门的标签列表
+     * @return 热门标签列表
      */
     @Operation(summary = "查询前20个热门标签", description = "查询前20个热门标签")
     @GetMapping("/hot")
@@ -47,14 +46,15 @@ public class TagController {
     }
 
     /**
-     * 获取标签GIF列表（支持游标分页）
-     * @param tagStr 标签 最多4个
-     * @param page 页码
-     * @param pageSize 每页数量
-     * @param sortType 排序类型：TIME/HOT
-     * @param lastId 最后一条记录的ID（TIME排序使用，首次查询不传默认null）
-     * @param lastValue 最后一条记录的排序字段值（TIME传created_at，首次查询不传默认null）
-     * @return gif列表
+     * 获取标签GIF列表
+     *
+     * @param tagStr 标签，多个用逗号分隔，最多5个
+     * @param page 页码，HOT排序时使用
+     * @param pageSize 每页数量，默认10
+     * @param sortType 排序类型（TIME-时间排序使用游标分页，HOT-热度排序使用普通分页）
+     * @param lastId 游标分页最后一条记录ID，TIME排序首次查询不传
+     * @param lastValue 游标分页最后一条记录排序值，TIME排序首次查询不传
+     * @return GIF列表
      */
     @Operation(summary = "获取标签GIF列表", description = "获取标签GIF列表，TIME使用游标分页，HOT使用page分页")
     @GetMapping(value = {"/tagGifs"})

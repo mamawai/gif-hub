@@ -28,10 +28,10 @@ public class GifController {
     private final ValidationService validationService;
 
     /**
-     * 上传gif
-     * @param gifDTO gif上传请求
+     * 上传GIF到Cloudflare R2
      *
-     * @return 上传结果
+     * @param gifDTO GIF上传请求，包含文件、标签等信息
+     * @return 上传成功后的GIF访问URL
      */
     @Operation(summary = "cloudflare上传gif", description = "cloudflare上传gif", operationId = "r2upload")
     @PostMapping(value = "/r2upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -58,10 +58,10 @@ public class GifController {
     }
 
     /**
-     * 批量上传gif
-     * @param batchUploadDTO 批量上传请求DTO
+     * 批量上传GIF到Cloudflare R2
      *
-     * @return 上传结果
+     * @param batchUploadDTO 批量上传请求
+     * @return 上传成功的GIF访问URL列表
      */
     @Operation(summary = "cloudflare批量上传gif", description = "cloudflare批量上传gif", operationId = "r2batchUpload")
     @PostMapping(value = "/r2BatchUpload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -93,7 +93,8 @@ public class GifController {
 
     /**
      * 更新GIF下载次数
-     * @param fileId 文件Id
+     *
+     * @param fileId GIF文件ID
      * @return 更新结果
      */
     @Operation(summary = "更新GIF下载次数", description = "更新GIF下载次数")
@@ -108,8 +109,9 @@ public class GifController {
     }
 
     /**
-     * 更新查看次数
-     * @param fileId 文件id
+     * 更新GIF查看次数（含限流保护）
+     *
+     * @param fileId GIF文件ID
      * @return 更新结果
      */
     @Operation(summary = "更新查看次数", description = "更新查看次数")
@@ -126,9 +128,10 @@ public class GifController {
     }
 
     /**
-     * 更新点赞次数
-     * @param likeRequestDTO 点赞请求
-     * @return 更新结果
+     * 点赞或取消点赞GIF
+     *
+     * @param likeRequestDTO 点赞请求，包含文件ID、分类ID和点赞状态
+     * @return 操作结果
      */
     @Operation(summary = "更新点赞次数", description = "更新点赞次数")
     @PostMapping("/likeOrDislike")
@@ -150,9 +153,10 @@ public class GifController {
     }
 
     /**
-     * 获取用户是否喜欢此gif
-     * @param fileId gif文件id
-     * @return 是否喜欢
+     * 查询当前用户是否喜欢此GIF
+     *
+     * @param fileId GIF文件ID
+     * @return true-已喜欢，false-未喜欢
      */
     @Operation(summary = "获取用户是否喜欢此gif", description = "获取用户是否喜欢此gif")
     @GetMapping("/isLikeThis")
@@ -169,11 +173,12 @@ public class GifController {
     }
 
     /**
-     * 按分类获取用户喜欢列表
+     * 按分类分页查询用户喜欢的GIF列表
+     *
      * @param categoryId 分类ID
-     * @param pageSize 每页数量
-     * @param pageNum 页码
-     * @return 用户喜欢列表
+     * @param pageNum 页码，默认1
+     * @param pageSize 每页数量，默认10
+     * @return 用户喜欢的GIF列表
      */
     @Operation(summary = "按分类分页获取用户喜欢列表", description = "按分类分页获取用户喜欢列表")
     @GetMapping("/likeByCategory")
@@ -193,8 +198,9 @@ public class GifController {
     }
 
     /**
-     * 删除(自己上传的)gif
-     * @param fileId 文件名
+     * 删除自己上传的GIF
+     *
+     * @param fileId GIF文件ID
      * @return 删除结果
      */
     @Operation(summary = "删除(自己上传的)gif", description = "删除(自己上传的)gif")
@@ -209,9 +215,10 @@ public class GifController {
     }
 
     /**
-     * 随机获取gif列表
-     * @param lastId 最后一个gif的id
-     * @return gif列表
+     * 随机获取GIF列表
+     *
+     * @param lastId 上次查询最后一个GIF的ID，用于分页加载
+     * @return 随机GIF列表
      */
     @Operation(summary = "随机获取gif列表", description = "随机获取gif列表")
     @GetMapping(value = {"/randomGifs", "/randomGifs/{lastId}"})
@@ -225,8 +232,9 @@ public class GifController {
     }
 
     /**
-     * 获取一个随机gif
-     * @return gif
+     * 随机获取一个GIF
+     *
+     * @return 随机GIF
      */
     @Operation(summary = "获取一个随机gif", description = "获取一个随机gif")
     @GetMapping("/randomGif")
@@ -240,10 +248,11 @@ public class GifController {
     }
     
     /**
-     * 分页获取当前用户上传的gif列表
-     * @param pageNum 页码
-     * @param pageSize 每页数量
-     * @return gif列表
+     * 分页查询当前用户上传的GIF列表
+     *
+     * @param pageNum 页码，默认1
+     * @param pageSize 每页数量，默认10
+     * @return 当前用户上传的GIF列表
      */
     @Operation(summary = "分页获取当前用户上传的gif列表", description = "分页获取当前用户上传的gif列表")
     @GetMapping("/my")

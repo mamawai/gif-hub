@@ -14,93 +14,104 @@ import java.util.List;
 public interface GifProcessService {
 
     /**
-     * 上传单个GIF文件
-     * @param gifDTO GIF上传请求
+     * 上传单个GIF文件到R2
      *
+     * @param gifDTO GIF上传请求
      * @return 文件访问URL
-     * @throws FileUploadException 文件上传异常
      */
     String r2uploadGif(GifDTO gifDTO) throws FileUploadException;
     
     /**
-     * 批量上传GIF文件
-     * @param gifsDTO GIF文件列表
+     * 批量上传GIF文件到R2
      *
+     * @param gifsDTO GIF文件列表
      * @return 文件访问URL列表
      */
     List<String> r2batchUploadGif(List<GifDTO> gifsDTO);
     
     /**
      * 删除GIF文件
+     *
      * @param fileId 文件ID
      * @return 是否删除成功
      */
     boolean deleteGif(String fileId);
     
     /**
-     * 获取用户上传的GIF文件列表
+     * 分页获取用户上传的GIF列表
+     *
      * @param userId 用户ID
      * @param page 页码
      * @param pageSize 每页数量
-     * @return GIF文件URL列表
+     * @return GIF列表及总数
      */
     Pair<List<GifVO>, Long> listGifsByUser(Long userId, Integer page, Integer pageSize);
     
     /**
      * 更新GIF下载次数
-     * @param fileId 文件Id
+     *
+     * @param fileId 文件ID
      * @return 是否更新成功
      */
     boolean updateDownloadCount(String fileId);
 
     /**
-     * 更新GIF点赞次数
+     * 更新GIF点赞状态
+     *
      * @param fileId 文件ID
      * @param userLikeCategoryId 用户喜欢分类ID
      * @param userId 用户ID
-     * @param isLike 点赞还是取消点赞
-     * @return 是否更新成功
+     * @param isLike true-点赞，false-取消点赞
+     * @return 是否操作成功
      */
     boolean updateLikeCount(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike);
 
     /**
-     * 按分类分页获取用户喜欢列表
+     * 按分类分页获取用户喜欢的GIF列表
+     *
      * @param userId 用户ID
      * @param categoryId 分类ID
-     * @return 用户喜欢列表
+     * @param pageNum 页码
+     * @param pageSize 每页数量
+     * @return 用户喜欢的GIF列表
      */
     List<GifVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize);
 
     /**
-     * 获取GIF总数（从Redis缓存）
+     * 获取GIF总数
+     *
      * @return GIF总数
      */
     Long getTotalGifCount();
 
     /**
      * 判断用户是否喜欢此GIF
+     *
      * @param fileId 文件ID
      * @param userId 用户ID
-     * @return 是否喜欢
+     * @return true-已喜欢，false-未喜欢
      */
     boolean isLikeThis(String fileId, Long userId);
 
     /**
      * 随机获取GIF列表
-     * @param lastId 最后一个GIF的ID
+     *
+     * @param lastId 上次查询最后一个GIF的ID，用于分页加载
      * @return 随机GIF列表
      */
     List<GifVO> getRandomGifs(String lastId);
 
     /**
-     * 获取随机GIF
+     * 随机获取一个GIF
+     *
      * @return 随机GIF
      */
     GifVO getRandomGif();
 
     /**
      * 更新GIF查看次数
-     * @param fileId 文件名
+     *
+     * @param fileId 文件ID
      * @return 是否更新成功
      */
     boolean updateViewCount(String fileId);

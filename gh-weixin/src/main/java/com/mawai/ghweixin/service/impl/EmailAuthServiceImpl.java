@@ -90,7 +90,10 @@ public class EmailAuthServiceImpl implements EmailAuthService {
     }
     
     /**
-     * 异步发送邮件
+     * 异步发送验证码邮件
+     *
+     * @param email 收件人邮箱
+     * @param verificationCode 验证码
      */
     @Async("emailSendExecutor")
     public void sendEmailAsync(String email, String verificationCode) {
@@ -106,7 +109,11 @@ public class EmailAuthServiceImpl implements EmailAuthService {
     }
 
     /**
-     * 是否验证失败
+     * 验证邮箱验证码是否有效
+     *
+     * @param email 邮箱
+     * @param code 验证码
+     * @return true-验证失败，false-验证成功
      */
     public boolean isVerifyFail(String email, String code) {
         if (!StringUtils.hasText(email) || !StringUtils.hasText(code)) {
@@ -265,6 +272,8 @@ public class EmailAuthServiceImpl implements EmailAuthService {
     
     /**
      * 生成6位随机数字验证码
+     *
+     * @return 6位数字验证码
      */
     private String generateVerificationCode() {
         Random random = new Random();

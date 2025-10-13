@@ -13,7 +13,18 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface GifService extends IService<Gif> {
 
+   /**
+    * 随机获取一个GIF
+    *
+    * @return GIF对象
+    */
    Gif getRandomOne();
 
+   /**
+    * 插入一条GIF记录
+    *
+    * @param gif GIF对象
+    * @return 是否插入成功
+    */
    Boolean insertOne(Gif gif);
 }

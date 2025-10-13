@@ -11,11 +11,11 @@ public interface TagProcessService {
      * 前缀查找标签
      *
      * @param content 查询内容
-     * @param offset 查询偏移量
-     * @param count 查询数量
+     * @param pageNum 查询页码
+     * @param pageSize 查询每页数量
      * @return 查询结果
      */
-    List<String> prefixSearch(String content, int offset, int count);
+    List<String> prefixSearch(String content, int pageNum, int pageSize);
 
     /**
      * 获取热门标签 -- 前20个

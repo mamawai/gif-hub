@@ -59,20 +59,20 @@ public class TagProcessServiceImpl implements TagProcessService {
      * 前缀查找标签
      *
      * @param content 查询内容
-     * @param offset 查询偏移量
-     * @param count 查询数量
+     * @param pageNum 查询页码
+     * @param pageSize 查询每页数量
      * @return 查询结果
      */
     @Override
-    public List<String> prefixSearch(String content, int offset, int count) {
-        if (StrUtil.isBlank(content)) return List.of();
+    public List<String> prefixSearch(String content, int pageNum, int pageSize) {
+        if (StrUtil.isBlank(content) || pageNum < 1 || pageSize < 1) return List.of();
         // 修改content的最后一个字符
         char lastChar = content.charAt(content.length() - 1);
         char newLastChar = (char) (lastChar + 1);
         String newContent = content.substring(0, content.length() - 1) + newLastChar;
         // 获取有序集合指定范围的元素
         return new ArrayList<>(cacheService.zRangeByLex(TAG_KEY + pinYinUtils.getPinyinEngine().getFirstLetter(content.charAt(0)),
-                content, newContent, offset, count));
+                content, newContent, (pageNum - 1) * pageSize, pageSize));
     }
 
     /**
