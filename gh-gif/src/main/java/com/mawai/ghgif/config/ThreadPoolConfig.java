@@ -97,8 +97,8 @@ public class ThreadPoolConfig {
                     loginId = StpUtil.getLoginIdAsString();
                 }
             } catch (Exception e) {
-                // 如果获取失败，可能是因为当前线程没有登录信息或请求上下文，忽略即可
-                log.error("CustomTaskDecorator: 获取主线程上下文失败", e);
+                // 如果获取失败，可能是因为当前线程没有登录信息或请求上下文（也就是不需要上下文），忽略即可
+                log.warn("CustomTaskDecorator: 获取主线程上下文失败", e);
             }
             final String finalLoginId = loginId;
             return () -> {

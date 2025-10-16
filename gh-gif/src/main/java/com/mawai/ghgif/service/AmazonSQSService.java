@@ -5,6 +5,8 @@ import com.mawai.ghgif.amazonSQS.AmazonSQSClientConfig;
 import com.mawai.ghgif.amazonSQS.MessageRouter;
 import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
 import com.mawai.ghgif.amazonSQS.util.CustomSQSMessageConsumer;
+import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghgif.service.impl.MessageServiceImpl;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +28,7 @@ public class AmazonSQSService implements SmartLifecycle {
     private SqsClient sqsClient;
     private volatile boolean running = true; // 启动前若为true，则sqs关闭
     private final List<MessageConsumer> messageConsumers;
-    private CustomSQSMessageConsumer sqsMessageConsumer;
+    private List<CustomSQSMessageConsumer> sqsMessageConsumerList;
     
     @Value("${aws.sqs.base-queue-url}")
     private String baseQueueUrl;
@@ -43,6 +45,10 @@ public class AmazonSQSService implements SmartLifecycle {
 
     /**
      * SmartLifecycle - 启动SQS消费者
+     * <p>如果想减轻单点MQ的压力，这里可以自己去配多个队列，然后可以定制不同消息映射到指定队列</p>
+     * 注意：前提是send的时候配置好正确的queueUrl和MessageType
+     *
+     * @see MessageServiceImpl#send(String, String, MessageType)
      */
     @Override
     public void start() {
@@ -53,8 +59,8 @@ public class AmazonSQSService implements SmartLifecycle {
             MessageRouter messageRouter = new MessageRouter();
             registerConsumer(messageRouter);
 
-            // 创建统一的CustomSQSMessageConsumer
-            sqsMessageConsumer = CustomSQSMessageConsumer.builder()
+            // 创建SQSMessageConsumer
+            CustomSQSMessageConsumer baseQueueConsumer = CustomSQSMessageConsumer.builder()
                     .sqsClient(sqsClient)
                     .queueUrl(baseQueueUrl)
                     .messageRouter(messageRouter)
@@ -65,7 +71,25 @@ public class AmazonSQSService implements SmartLifecycle {
                     .shutdownHook(() -> log.info("统一消费者关闭钩子执行"))
                     .build();
 
-            sqsMessageConsumer.start();
+            sqsMessageConsumerList.add(baseQueueConsumer);
+
+            baseQueueConsumer.start();
+
+            /*
+             e.g. 创建 anotherSQS
+             CustomSQSMessageConsumer anotherSQS = CustomSQSMessageConsumer.builder()
+                    .sqsClient(sqsClient)
+                    .queueUrl(anotherQueueUrl)
+                    .messageRouter(messageRouter) --> 这里不用改
+                    .maxWaitTimeSeconds(20)
+                    .maxNumberOfMessages(10)
+                    .pollingThreadCount(1)
+                    .exceptionHandler(e -> log.error("统一消费者处理消息出错: {}", e.getMessage(), e))
+                    .shutdownHook(() -> log.info("统一消费者关闭钩子执行"))
+                    .build();
+             sqsMessageConsumerList.add(anotherSQS);
+             anotherSQS.start();
+            */
 
             running = true;
             log.info("✅ SmartLifecycle.start(): 统一SQS消费者启动完成，已注册{}个处理器", messageRouter.getHandlerCount());
@@ -86,21 +110,25 @@ public class AmazonSQSService implements SmartLifecycle {
     }
 
     /**
-     * SmartLifecycle - 停止SQS消费者
+     * SmartLifecycle - 停止SQS消费者列表
      */
     @Override
     public void stop() {
-        if (running && sqsMessageConsumer != null) {
-            log.info("🛑 SmartLifecycle.stop(): 停止统一SQS消费者...");
+        if (running && sqsMessageConsumerList != null && !sqsMessageConsumerList.isEmpty()) {
+            log.info("🛑 SmartLifecycle.stop(): 停止SQS消费者列表...");
 
+            String queueUrl = "";
             try {
-                sqsMessageConsumer.terminate();
-                log.info("统一SQS消费者已优雅关闭");
+                for (CustomSQSMessageConsumer consumer : sqsMessageConsumerList) {
+                    consumer.shutdown();
+                    queueUrl = consumer.getQueueUrl();
+                    log.info("队列:{}, SQS消费者已优雅关闭", queueUrl);
+                }
             } catch (Exception e) {
-                log.error("关闭统一SQS消费者时发生错误: {}", e.getMessage(), e);
+                log.error("关闭队列:{}, SQS消费者时发生错误: {}", queueUrl,  e.getMessage(), e);
             }
 
-            sqsMessageConsumer = null;
+            sqsMessageConsumerList = null;
             running = false;
             log.info("✅ SmartLifecycle.stop(): 统一SQS消费者停止完成");
         }

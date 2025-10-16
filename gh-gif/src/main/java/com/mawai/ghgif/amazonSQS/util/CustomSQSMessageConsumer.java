@@ -2,6 +2,7 @@ package com.mawai.ghgif.amazonSQS.util;
 
 import com.mawai.ghgif.amazonSQS.MessageRouter;
 import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityRequest;
@@ -38,6 +39,11 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     ExecutorService vte = Executors.newVirtualThreadPerTaskExecutor();
 
     private final SqsClient sqsClient;
+    /**
+     * -- GETTER --
+     *  获取队列URL
+     */
+    @Getter
     private final String queueUrl;
     private final MessageRouter messageRouter;
     private final Consumer<Exception> exceptionHandler;
