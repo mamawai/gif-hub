@@ -36,6 +36,7 @@ public class TagController {
 
     /**
      * 查询前20个热门标签
+     * 搜索联想时补全
      *
      * @return 热门标签列表
      */

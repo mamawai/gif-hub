@@ -62,6 +62,13 @@ public class Comment implements Serializable {
     private Long parentId;
 
     /**
+     * 根评论ID
+     */
+    @TableField("root_comment_id")
+    @Schema(description = "根评论ID")
+    private Long rootCommentId;
+
+    /**
      * 评论内容
      */
     @TableField("content")

@@ -115,4 +115,12 @@ public interface GifProcessService {
      * @return 是否更新成功
      */
     boolean updateViewCount(String fileId);
+
+    /**
+     * 根据GIF ID查询单个GIF详情
+     *
+     * @param gifId GIF的ID
+     * @return GIF详情
+     */
+    GifVO getGifById(Long gifId);
 }

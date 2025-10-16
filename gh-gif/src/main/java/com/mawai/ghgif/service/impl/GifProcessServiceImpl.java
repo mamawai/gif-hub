@@ -827,4 +827,33 @@ public class GifProcessServiceImpl implements GifProcessService {
         }
     }
 
+    /**
+     * 根据GIF ID查询单个GIF详情
+     * 
+     * @param gifId GIF的ID
+     * @return GIF详情，如果不存在则返回null
+     */
+    @Override
+    public GifVO getGifById(Long gifId) {
+        // 查询GIF
+        Gif gif = gifService.getById(gifId);
+        
+        if (gif == null) {
+            return null;
+        }
+        
+        // 检查状态：只返回正常状态的GIF
+        if (gif.getStatus() != 1) {
+            return null;
+        }
+        
+        // 转换为VO
+        GifVO gifVO = gifParamMapper.toGifVO(gif);
+        
+        // 合并所有实时数量（点赞、查看、下载）
+        mergeAllRealTimeCounts(List.of(gifVO));
+        
+        return gifVO;
+    }
+
 }

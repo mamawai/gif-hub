@@ -269,4 +269,26 @@ public class GifController {
             return ApiResponse.error(500, "获取当前用户上传的gif列表失败：" + e.getMessage());
         }
     }
+
+    /**
+     * 根据GIF ID查询单个GIF详情
+     *
+     * @param gifId GIF的ID
+     * @return GIF详情
+     */
+    @Operation(summary = "根据ID获取GIF详情", description = "通过GIF ID查询单个GIF的详细信息")
+    @GetMapping("/{gifId}")
+    public ApiResponse<GifVO> getGifById(@PathVariable Long gifId) {
+        try {
+            GifVO gifVO = gifProcessService.getGifById(gifId);
+            
+            if (gifVO == null) {
+                return ApiResponse.error(404, "GIF不存在或已下架");
+            }
+            
+            return ApiResponse.success(gifVO);
+        } catch (Exception e) {
+            return ApiResponse.error(500, "获取GIF详情失败：" + e.getMessage());
+        }
+    }
 }
