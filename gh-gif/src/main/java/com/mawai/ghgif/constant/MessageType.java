@@ -15,7 +15,11 @@ public enum MessageType {
     
     EMAIL_MESSAGE("email"),
 
-    USER_LIKES_MESSAGE("userLikes");
+    USER_LIKES_MESSAGE("userLikes"),
+    
+    COMMENT_LIKES_MESSAGE("commentLikes"),
+    
+    COMMENT_MESSAGE("comment");
 
     private final String value;
 

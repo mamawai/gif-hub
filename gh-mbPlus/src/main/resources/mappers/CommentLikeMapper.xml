@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mawai.ghmbplus.dao.CommentLikeMapper">
+
+    <!-- 批量查询用户对评论的点赞状态 -->
+    <select id="selectLikedCommentIds" resultType="long">
+        SELECT comment_id
+        FROM comment_like
+        WHERE user_id = #{userId}
+          AND comment_id IN
+        <foreach collection="commentIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <!-- 分页查询用户点赞的评论（带评论详情） -->
+    <select id="selectUserLikedCommentsBO" resultType="com.mawai.ghmbplus.dto.CommentLikeBO">
+        SELECT 
+            c.id AS comment_id,
+            c.gif_id,
+            c.content,
+            c.user_id,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar,
+            cl.created_at AS liked_at
+        FROM comment_like cl
+        INNER JOIN comment c ON cl.comment_id = c.id
+        INNER JOIN user u ON c.user_id = u.id
+        WHERE cl.user_id = #{userId}
+          AND c.status = 1
+        ORDER BY cl.created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 批量插入评论点赞记录（忽略重复） -->
+    <insert id="batchInsertIgnore" parameterType="java.util.List">
+        INSERT IGNORE INTO comment_like (user_id, comment_id)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.commentId})
+        </foreach>
+    </insert>
+
+    <!-- 批量删除评论点赞记录 -->
+    <delete id="batchDelete" parameterType="java.util.List">
+        DELETE FROM comment_like
+        WHERE (user_id, comment_id) IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            (#{item.userId}, #{item.commentId})
+        </foreach>
+    </delete>
+
+</mapper>
+

@@ -4,12 +4,16 @@ import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
+import com.mawai.ghgif.amazonSQS.consumer.CommentLikesConsumer;
 import com.mawai.ghgif.amazonSQS.consumer.UserLikesConsumer;
+import com.mawai.ghgif.amazonSQS.message.CommentLikesMessage;
 import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
+import com.mawai.ghmbplus.dao.CommentMapper;
+import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.*;
@@ -27,6 +31,7 @@ import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
+import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -43,6 +48,8 @@ public class GifScheduleExecutorWithSQS {
 
     private final CacheService cacheService;
     private final GifMapper gifMapper;
+    private final CommentMapper commentMapper;
+    private final CommentPendingDeleteMapper commentPendingDeleteMapper;
     private final GifDeleteService gifDeleteService;
     private final GifDeleteFailedService gifDeleteFailedService;
     private final MessageService messageService;
@@ -63,9 +70,15 @@ public class GifScheduleExecutorWithSQS {
     private static final String USER_LIKE_CATEGORY_KEY = "user:like:category:";
     private static final String USER_DISLIKE_KEY = "user:dislike:";
     private final static String HOT_TAG_KEY = "hotTag";
+    private static final String COMMENT_LIKE_COUNT_KEY = "comment:like:";
+    private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:";
+    private static final String USER_COMMENT_DISLIKE_KEY = "user:comment:dislike:";
 
     @Value("${aws.sqs.base-queue-url}")
     private String SQS_QUEUE_URL;
+
+    @Value("${redis.scanCount}")
+    private Integer SCAN_COUNT;
 
     /**
      * 定时任务：将Redis中GIF点赞次数和用户喜欢的GIF同步到数据库
@@ -78,13 +91,16 @@ public class GifScheduleExecutorWithSQS {
      *   <li>同步GIF查看次数到数据库（{@link #syncViewCountsToDatabase()}）</li>
      *   <li>同步GIF点赞计数到数据库（{@link #syncLikeCountsToDatabase()}）</li>
      *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabaseConcurrent()}）</li>
+     *   <li>同步评论点赞计数到数据库（{@link #syncCommentLikeCountsToDatabase()}）</li>
+     *   <li>同步用户评论点赞记录到数据库（{@link #syncUserCommentLikesToDatabase()}）</li>
      * </ul>
      * 
      * @see #syncDownloadCountToDatabase() 下载数据同步实现
      * @see #syncViewCountsToDatabase() 查看数据同步实现
      * @see #syncLikeCountsToDatabase() 点赞数据同步实现
-     * @see #syncUserLikesToDatabaseConcurrent() () 用户喜欢记录同步实现
-     * @see CacheService#getKeysWithPattern(String) 获取符合模式的Redis键
+     * @see #syncUserLikesToDatabaseConcurrent() 用户喜欢记录同步实现
+     * @see #syncCommentLikeCountsToDatabase() 评论点赞数据同步实现
+     * @see CacheService#scanKeys(String, int) 获取符合模式的Redis键
      */
     @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 转换为毫秒
     public void syncGifLikeCount() {
@@ -115,6 +131,20 @@ public class GifScheduleExecutorWithSQS {
             .runAsync(this::syncUserLikesToDatabaseConcurrent, scheduledExecutor)
             .exceptionally(e -> {
                 log.error("同步用户喜欢记录失败: {}", e.getMessage(), e);
+                return null;
+            });
+        
+        CompletableFuture
+            .runAsync(this::syncCommentLikeCountsToDatabase, scheduledExecutor)
+            .exceptionally(e -> {
+                log.error("同步评论点赞计数失败: {}", e.getMessage(), e);
+                return null;
+            });
+        
+        CompletableFuture
+            .runAsync(this::syncUserCommentLikesToDatabase, scheduledExecutor)
+            .exceptionally(e -> {
+                log.error("同步用户评论点赞记录失败: {}", e.getMessage(), e);
                 return null;
             });
         
@@ -239,7 +269,7 @@ public class GifScheduleExecutorWithSQS {
      *   <li>批量更新数据库</li>
      * </ol>
      *
-     * 由于重置为0到db更新这段时间查询会不一致，所以先把db更新放在这里先不用SQS
+     * 由于重置为0到db更新这段时间查询的结果会不一致，所以先把db更新放在这里先不用SQS
      */
     private void syncLikeCountsToDatabase() {
         try {
@@ -321,7 +351,10 @@ public class GifScheduleExecutorWithSQS {
     private void syncUserLikesToDatabaseConcurrent() {
         try {
             // 获取所有有like/dislike数据的用户ID
-            Set<String> userIds = cacheService.getUserIdsWithLikeDataOptimized(USER_LIKE_CATEGORY_KEY, USER_DISLIKE_KEY);
+            Set<String> userIds = cacheService.getUserIdsWithLikeDataOptimized(
+                    USER_LIKE_CATEGORY_KEY,
+                    USER_DISLIKE_KEY,
+                    SCAN_COUNT);
 
             if (userIds.isEmpty()) {
                 log.info("没有有效的用户喜欢记录需要同步");
@@ -372,7 +405,7 @@ public class GifScheduleExecutorWithSQS {
 
             // 删除使用次数为0的Tag数据 -- 删除gif时会删除gifTag，这里删除Tag先不删除gifTag
             LambdaQueryWrapper<Tag> queryWrapper = new LambdaQueryWrapper<>();
-            tagMapper.delete(queryWrapper.eq(Tag::getUseCount, 0));
+            tagMapper.delete(queryWrapper.eq(Tag::getUseCount, 0).last("limit 200")); // limit 防止大量数据回表
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -594,6 +627,297 @@ public class GifScheduleExecutorWithSQS {
 
         } catch (Exception e) {
             log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 定时清理软删除的评论（物理删除）
+     * 
+     * <p>每天凌晨3点执行，清理策略：</p>
+     * <ul>
+     *   <li>从 comment_pending_delete 表获取待删除评论ID</li>
+     *   <li>根据主键批量物理删除</li>
+     * </ul>
+     */
+    @Scheduled(cron = "0 0 3 * * ?") // 每天凌晨3点执行
+    public void cleanupDeletedComments() {
+        try {
+            int batchSize = 1000;
+            // 从待删除表获取ID
+            log.info("开始从待删除表获取评论ID...");
+            int tableDeletedCount = deleteCommentsFromPendingTable(batchSize);
+            
+            // 汇总日志
+            log.info("定时清理完成：共物理删除 {} 条评论", tableDeletedCount);
+        } catch (Exception e) {
+            log.error("清理软删除评论失败", e);
+        }
+    }
+    
+    /**
+     * 从待删除表批量删除评论
+     *
+     * @param batchSize 每批处理数量
+     * @return 删除的评论数量
+     */
+    private int deleteCommentsFromPendingTable(int batchSize) {
+        int totalDeleted = 0;
+        try {
+            while (true) {
+                // 从待删除表查询ID
+                LambdaQueryWrapper<CommentPendingDelete> queryWrapper = new LambdaQueryWrapper<>();
+                queryWrapper.last("LIMIT " + batchSize);
+                
+                List<CommentPendingDelete> pendingList = commentPendingDeleteMapper.selectList(queryWrapper);
+                
+                if (pendingList.isEmpty()) {
+                    break; // 待删除表为空
+                }
+                
+                // 提取评论ID
+                List<Long> commentIds = pendingList.stream()
+                        .map(CommentPendingDelete::getCommentId)
+                        .collect(Collectors.toList());
+                
+                // 提取待删除记录ID
+                List<Long> pendingIds = pendingList.stream()
+                        .map(CommentPendingDelete::getId)
+                        .collect(Collectors.toList());
+                
+                // 批量删除评论
+                LambdaQueryWrapper<Comment> deleteCommentWrapper = new LambdaQueryWrapper<>();
+                deleteCommentWrapper.in(Comment::getId, commentIds);
+                int deletedCount = commentMapper.delete(deleteCommentWrapper);
+                
+                // 删除待删除表中的记录
+                LambdaQueryWrapper<CommentPendingDelete> deletePendingWrapper = new LambdaQueryWrapper<>();
+                deletePendingWrapper.in(CommentPendingDelete::getId, pendingIds);
+                commentPendingDeleteMapper.delete(deletePendingWrapper);
+                
+                totalDeleted += deletedCount;
+                
+                if (deletedCount > 0) {
+                    log.info("从待删除表删除 {} 条评论", deletedCount);
+                }
+                
+                // 如果本批次少于batchSize，说明已经处理完了
+                if (pendingList.size() < batchSize) {
+                    break;
+                }
+
+            }
+        } catch (Exception e) {
+            log.error("从待删除表删除评论失败", e);
+        }
+        return totalDeleted;
+    }
+    
+    /**
+     * 同步评论点赞数据到数据库
+     *
+     * <p>从Redis获取所有需要同步的评论点赞计数数据，并将其增量更新到数据库中。
+     * 处理流程与GIF点赞同步类似：</p>
+     * 
+     * <ol>
+     *   <li>扫描匹配的key + 过滤非零值 + 获取值 + 重置为0</li>
+     *   <li>提取每个键中的评论 ID</li>
+     *   <li>批量更新数据库</li>
+     * </ol>
+     */
+    private void syncCommentLikeCountsToDatabase() {
+        try {
+            Map<String, Long> nonZeroCounters = cacheService.scanAndResetNonZeroCounters(COMMENT_LIKE_COUNT_KEY + "*");
+            
+            if (nonZeroCounters.isEmpty()) {
+                log.info("没有评论点赞记录需要同步");
+                return;
+            }
+            
+            log.info("发现{}个评论点赞记录需要同步", nonZeroCounters.size());
+            int prefixLength = COMMENT_LIKE_COUNT_KEY.length();
+            
+            // commentId -> likeCount
+            Map<Long, Long> incrementMap = new HashMap<>();
+            
+            for (Map.Entry<String, Long> entry : nonZeroCounters.entrySet()) {
+                String countKey = entry.getKey();
+                Long likeCount = entry.getValue();
+                
+                try {
+                    // 提取ID - 使用前缀长度直接获取
+                    if (countKey.length() <= prefixLength) {
+                        log.warn("commentLike无效的键格式: {}", countKey);
+                        continue;
+                    }
+                    String commentId = countKey.substring(prefixLength);
+                    
+                    if (likeCount != null && likeCount != 0) {
+                        incrementMap.put(Long.parseLong(commentId), likeCount);
+                    }
+                } catch (Exception e) {
+                    log.error("处理评论点赞键失败: {}, 错误: {}", countKey, e.getMessage());
+                }
+            }
+            
+            if (incrementMap.isEmpty()) {
+                return;
+            }
+            
+            // 统一处理
+            int updatedCount = commentMapper.updateLikeCountBatchByMap(incrementMap);
+            
+            log.info("已批量更新{}个评论点赞数, 计划更新{}个, 相差{}个", 
+                    updatedCount, incrementMap.size(), incrementMap.size() - updatedCount);
+            
+        } catch (Exception e) {
+            log.error("同步评论点赞数失败", e);
+        }
+    }
+
+    /**
+     * 同步用户评论点赞记录到数据库 - 异步SQS版本（生产者角色）
+     * 
+     * <p>该方法作为生产者，负责获取Redis中的用户评论点赞数据并发送到SQS队列。
+     * 采用原子rename操作确保数据安全，避免处理期间的数据丢失。</p>
+     * 
+     * <h3>处理流程：</h3>
+     * <ol>
+     *   <li>扫描所有 user:comment:like:{userId} 键</li>
+     *   <li>并发处理每个用户，调用 {@code fetchSingleUserCommentData} 获取数据</li>
+     *   <li>将数据封装为 {@code CommentLikesMessage} 发送到SQS队列</li>
+     *   <li>由 {@code CommentLikesConsumer} 异步消费并同步到数据库</li>
+     * </ol>
+     * 
+     * <h3>数据安全保证：</h3>
+     * 使用原子rename操作而非get-delete，确保：
+     * <ul>
+     *   <li>处理期间的新数据不会丢失（写入原始key）</li>
+     *   <li>SQS发送失败时数据仍在processingKey中</li>
+     *   <li>避免并发处理的竞态条件</li>
+     * </ul>
+     * 
+     * @since 2025-10-17 - SQS异步重构版本
+     * @see CommentLikesConsumer#handle(Message) 
+     * @see CommentLikesMessage
+     * @see #fetchSingleUserCommentData(String)
+     */
+    private void syncUserCommentLikesToDatabase() {
+        try {
+            // 获取所有有评论点赞/取消点赞数据的用户ID（类似GIF的逻辑）
+            Set<String> userIds = cacheService.getUserIdsWithLikeDataOptimized(
+                    USER_COMMENT_LIKE_KEY,
+                    USER_COMMENT_DISLIKE_KEY,
+                    SCAN_COUNT
+            );
+            
+            if (userIds == null || userIds.isEmpty()) {
+                log.info("没有用户评论点赞记录需要同步");
+                return;
+            }
+            
+            log.info("发现{}个用户的评论点赞/取消点赞记录需要同步，使用SQS处理（当前是生产者）", userIds.size());
+            
+            // 使用虚拟线程并发处理每个用户
+            userIds.forEach(userId ->
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        CommentLikesMessage message = fetchSingleUserCommentData(userId);
+                        if (message != null) {
+                            // 发送到SQS
+                            messageService.send(
+                                JSONUtil.toJsonStr(message), 
+                                SQS_QUEUE_URL, 
+                                MessageType.COMMENT_LIKES_MESSAGE
+                            );
+                            int newCount = message.getNewLikes() != null ? message.getNewLikes().size() : 0;
+                            int deleteCount = message.getDeleteLikes() != null ? message.getDeleteLikes().size() : 0;
+                            log.info("已发送用户{}的评论点赞数据到SQS，新增{}条，删除{}条", 
+                                    message.getUserId(), newCount, deleteCount);
+                        }
+                    } catch (Exception e) {
+                        log.error("处理用户{}评论点赞数据失败: 错误: {}", 
+                                userId, e.getMessage(), e);
+                    }
+                }, virtualDataFetchExecutor)); // 使用虚拟线程池
+            
+            log.info("已发送{}个评论点赞同步请求到SQS，等待消费者处理", userIds.size());
+            
+        } catch (Exception e) {
+            log.error("生产者同步用户评论点赞记录失败: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * 获取单个用户的评论点赞数据（纯IO操作，适合虚拟线程）
+     * 
+     * <p>完全复用GIF的逻辑，处理like set和dislike set：</p>
+     * <ul>
+     *   <li>获取并删除like set中的数据（新增点赞）</li>
+     *   <li>获取并删除dislike set中的数据（取消点赞）</li>
+     *   <li>使用getStringSetSafely方法，自动清理Redis中的数据</li>
+     * </ul>
+     * 
+     * @param userId 用户ID
+     * @return 评论点赞消息对象，如果没有数据则返回null
+     */
+    private CommentLikesMessage fetchSingleUserCommentData(String userId) {
+        try {
+            Long userIdLong = Long.parseLong(userId);
+            String likeSetKey = USER_COMMENT_LIKE_KEY + userId;
+            String dislikeSetKey = USER_COMMENT_DISLIKE_KEY + userId;
+            
+            // 获取并删除Redis数据（参数true表示删除）
+            Set<String> likeCommentIds = cacheService.getStringSetSafely(likeSetKey, true);
+            Set<String> dislikeCommentIds = cacheService.getStringSetSafely(dislikeSetKey, true);
+            
+            // 没有点赞和取消点赞记录，直接返回null
+            if (CollectionUtil.isEmpty(likeCommentIds) && CollectionUtil.isEmpty(dislikeCommentIds)) {
+                return null;
+            }
+            
+            List<CommentLike> newLikes = new ArrayList<>();
+            List<CommentLike> deleteLikes = new ArrayList<>();
+            
+            // 处理新增点赞
+            for (String commentIdStr : likeCommentIds) {
+                try {
+                    CommentLike commentLike = new CommentLike()
+                            .setUserId(userIdLong)
+                            .setCommentId(Long.parseLong(commentIdStr));
+                    newLikes.add(commentLike);
+                } catch (NumberFormatException e) {
+                    log.warn("忽略点赞无效的评论ID: {}", commentIdStr);
+                }
+            }
+            
+            // 处理取消点赞
+            for (String commentIdStr : dislikeCommentIds) {
+                try {
+                    CommentLike commentLike = new CommentLike()
+                            .setUserId(userIdLong)
+                            .setCommentId(Long.parseLong(commentIdStr));
+                    deleteLikes.add(commentLike);
+                } catch (NumberFormatException e) {
+                    log.warn("忽略取消点赞无效的评论ID: {}", commentIdStr);
+                }
+            }
+            
+            // 如果两个列表都为空，返回null
+            if (newLikes.isEmpty() && deleteLikes.isEmpty()) {
+                return null;
+            }
+            
+            // 构建消息对象
+            return CommentLikesMessage.builder()
+                    .userId(userIdLong)
+                    .newLikes(newLikes.isEmpty() ? null : newLikes)
+                    .deleteLikes(deleteLikes.isEmpty() ? null : deleteLikes)
+                    .build();
+                    
+        } catch (Exception e) {
+            log.error("获取用户{}评论点赞数据失败: 错误: {}", 
+                    userId, e.getMessage(), e);
             return null;
         }
     }

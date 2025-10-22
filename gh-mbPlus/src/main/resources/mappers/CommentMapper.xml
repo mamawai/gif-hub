@@ -2,4 +2,156 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.mawai.ghmbplus.dao.CommentMapper">
 
+    <!-- 批量更新评论点赞数 -->
+    <update id="updateLikeCountBatchByMap">
+        UPDATE comment
+        SET like_count = like_count + CASE id
+        <foreach collection="incrementMap.entrySet()" item="entry" separator=" ">
+            WHEN #{entry.key} THEN #{entry.value}
+        </foreach>
+        END
+        WHERE id IN
+        <foreach collection="incrementMap.keySet()" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <!-- 使用游标查询根评论列表（按时间由远到近） -->
+    <select id="selectRootCommentsByCursor" resultType="com.mawai.ghmbplus.dto.RootCommentBO">
+        SELECT
+            c.id,
+            c.gif_id,
+            c.user_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        WHERE c.gif_id = #{gifId}
+          AND c.root_comment_id IS NULL
+          AND c.status = 1
+        <if test="cursor != null">
+          AND c.created_at &gt; #{cursor}
+        </if>
+        ORDER BY c.created_at ASC
+        LIMIT #{limit}
+    </select>
+    
+    <!-- 批量统计根评论的子评论数量 -->
+    <select id="countChildCommentsBatch" resultType="map">
+        SELECT 
+            root_comment_id,
+            COUNT(*) AS child_count
+        FROM comment
+        WHERE root_comment_id IN
+        <foreach collection="rootCommentIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        AND status = 1
+        GROUP BY root_comment_id
+    </select>
+
+    <!-- 使用游标查询子评论列表（按时间由远到近） -->
+    <select id="selectChildCommentsByCursor" resultType="com.mawai.ghmbplus.dto.ChildCommentBO">
+        SELECT 
+            c.id,
+            c.gif_id,
+            c.user_id,
+            c.parent_id,
+            c.parent_user_id,
+            c.root_comment_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar,
+            pu.nickname AS parent_nickname
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        LEFT JOIN user pu ON c.parent_user_id = pu.id
+        WHERE c.root_comment_id = #{rootCommentId}
+          AND c.status = 1
+        <if test="cursor != null">
+          AND c.created_at &gt; #{cursor}
+        </if>
+        ORDER BY c.created_at ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 批量查询根评论BY IDs（带用户信息） -->
+    <select id="selectRootCommentsByIds" resultType="com.mawai.ghmbplus.dto.RootCommentBO">
+        SELECT
+            c.id,
+            c.gif_id,
+            c.user_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        WHERE c.id IN
+        <foreach collection="commentIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+          AND c.status = 1
+    </select>
+
+    <!-- 批量查询子评论BY IDs（带用户信息） -->
+    <select id="selectChildCommentsByIds" resultType="com.mawai.ghmbplus.dto.ChildCommentBO">
+        SELECT
+            c.id,
+            c.gif_id,
+            c.user_id,
+            c.parent_id,
+            c.parent_user_id,
+            c.root_comment_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar,
+            pu.nickname AS parent_nickname
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        LEFT JOIN user pu ON c.parent_user_id = pu.id
+        WHERE c.id IN
+        <foreach collection="commentIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+          AND c.status = 1
+    </select>
+    
+    <!-- 统计某个根评论的子评论数量 -->
+    <select id="countChildComments" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM comment
+        WHERE root_comment_id = #{rootCommentId}
+          AND status = 1
+    </select>
+
+    <!-- 查询热门根评论（点赞数>=minLikes，最多limit条，按点赞数降序） -->
+    <select id="selectHotRootComments" resultType="com.mawai.ghmbplus.dto.RootCommentBO">
+        SELECT 
+            c.id,
+            c.gif_id,
+            c.user_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        WHERE c.gif_id = #{gifId}
+          AND c.root_comment_id IS NULL
+          AND c.status = 1
+          AND c.like_count &gt;= #{minLikes}
+        ORDER BY c.like_count DESC, c.created_at ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

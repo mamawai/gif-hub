@@ -6,8 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.Limit;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.*;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
@@ -441,6 +440,68 @@ public class CacheService {
     }
 
     /**
+     * 评论点赞操作（支持取消点赞）- 使用Set+Set混合结构
+     * @param countKey 计数键 comment:like:commentId
+     * @param likeSetKey 点赞Set键 user:comment:like:userId
+     * @param dislikeSetKey 取消点赞Set键 user:comment:dislike:userId
+     * @param commentId 评论ID
+     * @param timeout 过期时间
+     * @param unit 时间单位
+     */
+    public void commentLikeOperation(String countKey, String likeSetKey, String dislikeSetKey, String commentId, long timeout, TimeUnit unit) {
+        String script = 
+            // 先检查dislike set，如果有则删除
+            "if redis.call('SISMEMBER', KEYS[3], ARGV[1]) == 1 then " +
+            "    redis.call('SREM', KEYS[3], ARGV[1]) " +
+            "end " +
+            // 尝试添加到like set，返回1表示新增成功，0表示已存在
+            "local added = redis.call('SADD', KEYS[2], ARGV[1]) " +
+            "if added == 1 then " +
+            "    redis.call('INCR', KEYS[1]) " +  // 只有新增成功才+1，保证幂等性
+            "end " +
+            "redis.call('EXPIRE', KEYS[1], ARGV[2]) " +
+            "redis.call('EXPIRE', KEYS[2], ARGV[2]) " +
+            "redis.call('EXPIRE', KEYS[3], ARGV[2]) " +
+            "return added";  // 返回1表示点赞成功，0表示已点赞
+            
+        stringRedisTemplate.execute(
+            RedisScript.of(script, Long.class),
+            List.of(countKey, likeSetKey, dislikeSetKey),
+            commentId, String.valueOf(unit.toSeconds(timeout))
+        );
+    }
+    
+    /**
+     * 评论取消点赞操作（使用Set+Set混合结构）
+     * @param countKey 计数键 comment:like:commentId
+     * @param likeSetKey 点赞Set键 user:comment:like:userId
+     * @param dislikeSetKey 取消点赞Set键 user:comment:dislike:userId
+     * @param commentId 评论ID
+     * @param timeout 过期时间
+     * @param unit 时间单位
+     */
+    public void commentDislikeOperation(String countKey, String likeSetKey, String dislikeSetKey, String commentId, long timeout, TimeUnit unit) {
+        String script = 
+            // 检查like set，如果有则删除
+            "if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then " +
+            "    redis.call('SREM', KEYS[2], ARGV[1]) " +
+            "else " +
+            // 如果like set中没有，说明是数据库中的老数据，标记到dislike set
+            "    redis.call('SADD', KEYS[3], ARGV[1]) " +
+            "    redis.call('EXPIRE', KEYS[3], ARGV[2]) " +
+            "end " +
+            "redis.call('DECR', KEYS[1]) " +  // 无论如何都-1
+            "redis.call('EXPIRE', KEYS[1], ARGV[2]) " +
+            "redis.call('EXPIRE', KEYS[2], ARGV[2])";
+            
+        stringRedisTemplate.execute(
+            RedisScript.of(script, Void.class),
+            List.of(countKey, likeSetKey, dislikeSetKey),
+            commentId, String.valueOf(unit.toSeconds(timeout))
+        );
+    }
+
+    /**
      * 获取set集合中的所有元素
      * @param key 键
      * @return 元素列表
@@ -482,25 +543,63 @@ public class CacheService {
             return Set.of();
         }
     }
-    
+
     /**
-     * 根据模式获取所有匹配的键
-     * @param pattern 键的模式，如"user:*"
-     * @return 匹配的键的集合
+     * 使用 KEYS 命令获取匹配的 key（仅用于开发/测试环境）
+     * 生产环境请使用 scanKeys 方法
+     * 
+     * @param pattern 匹配模式
+     * @return key 集合
+     * @deprecated 生产环境禁用，请使用 scanKeys(String pattern, int count)
      */
+    @Deprecated
     public Set<String> getKeysWithPattern(String pattern) {
         return redisTemplate.keys(pattern);
     }
+    
+    /**
+     * 使用 SCAN 命令获取匹配的 key（推荐）
+     * <ul>
+     *   <li>渐进式遍历，不阻塞 Redis</li>
+     *   <li>适合大数据量场景</li>
+     *   <li>可控制每次迭代的数量</li>
+     * </ul>
+     * 
+     * @param pattern 匹配模式，如 "user:comment:like:*"
+     * @param count 每次迭代返回的建议数量（实际可能更多或更少）
+     *              推荐值：500-1000（根据数据量调整）
+     * @return key 集合
+     */
+    public Set<String> scanKeys(String pattern, int count) {
+        Set<String> keys = new HashSet<>();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(
+                ScanOptions.scanOptions()
+                        .match(pattern)
+                        .count(count)
+                        .build())) {
+            
+            cursor.forEachRemaining(keys::add);
+            
+        } catch (Exception e) {
+            log.error("SCAN keys failed: pattern={}, count={}, error={}", 
+                     pattern, count, e.getMessage(), e);
+            throw new RuntimeException("SCAN keys failed: " + e.getMessage(), e);
+        }
+        
+        return keys;
+    }
 
     /**
-     * 获取所有有like或dislike数据的用户ID（新数据结构）
+     * 获取所有有like或dislike数据的用户ID（使用 SCAN 优化）
+     * 
      * @param likeCategoryKeyPrefix 用户喜欢分类键前缀，如"user:like:category:"
      * @param dislikeKeyPrefix 用户不喜欢键前缀，如"user:dislike:"
      * @return 用户ID集合
      */
-    public Set<String> getUserIdsWithLikeDataOptimized(String likeCategoryKeyPrefix, String dislikeKeyPrefix) {
-        Set<String> likeKeys = getKeysWithPattern(likeCategoryKeyPrefix + "*");
-        Set<String> dislikeKeys = getKeysWithPattern(dislikeKeyPrefix + "*");
+    public Set<String> getUserIdsWithLikeDataOptimized(String likeCategoryKeyPrefix, String dislikeKeyPrefix, int count) {
+        // 使用 SCAN 替代 KEYS
+        Set<String> likeKeys = scanKeys(likeCategoryKeyPrefix + "*", count);
+        Set<String> dislikeKeys = scanKeys(dislikeKeyPrefix + "*", count);
 
         Set<String> userIds = new HashSet<>();
         int likePrefixLength = likeCategoryKeyPrefix.length();
@@ -642,5 +741,166 @@ public class CacheService {
                 List.of(key),
                 (Object[]) args
         );
+    }
+
+    /**
+     * 存储List到Redis（序列化为JSON）
+     * @param key 键
+     * @param list 列表数据
+     * @param timeout 过期时间
+     * @param unit 时间单位
+     * @param <T> 列表元素类型
+     */
+    public <T> void setList(String key, List<T> list, long timeout, TimeUnit unit) {
+        try {
+            String json = objectMapper.writeValueAsString(list);
+            stringRedisTemplate.opsForValue().set(key, json, timeout, unit);
+        } catch (Exception e) {
+            log.error("存储List到Redis失败: key={}, error={}", key, e.getMessage(), e);
+            throw new RuntimeException("存储List到Redis失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 从Redis获取List（反序列化JSON）
+     * @param key 键
+     * @param clazz 列表元素类型
+     * @param <T> 列表元素类型
+     * @return List对象，不存在返回null
+     */
+    public <T> List<T> getList(String key, Class<T> clazz) {
+        try {
+            String json = stringRedisTemplate.opsForValue().get(key);
+            if (json == null || json.isEmpty()) {
+                return null;
+            }
+            return objectMapper.readValue(json, 
+                objectMapper.getTypeFactory().constructCollectionType(List.class, clazz));
+        } catch (Exception e) {
+            log.error("从Redis获取List失败: key={}, error={}", key, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 删除匹配pattern的所有key（使用SCAN避免阻塞）
+     * @param pattern 匹配模式
+     * @return 删除的key数量
+     */
+    public long deletePattern(String pattern) {
+        try {
+            Set<String> keys = scanKeys(pattern, 500);
+            if (keys.isEmpty()) {
+                return 0;
+            }
+            Long deleted = stringRedisTemplate.delete(keys);
+            log.info("删除匹配pattern的key: pattern={}, count={}", pattern, deleted);
+            return deleted != null ? deleted : 0;
+        } catch (Exception e) {
+            log.error("删除匹配pattern的key失败: pattern={}, error={}", pattern, e.getMessage(), e);
+            return 0;
+        }
+    }
+
+    // ==================== ZSet 操作方法 ====================
+
+    /**
+     * 获取ZSet指定范围的元素（倒序：高分在前）
+     * @param key ZSet的key
+     * @param start 开始索引（0-based）
+     * @param end 结束索引（包含）
+     * @return 元素集合（LinkedHashSet保持顺序）
+     */
+    public Set<String> zsetReverseRange(String key, long start, long end) {
+        try {
+            return stringRedisTemplate.opsForZSet().reverseRange(key, start, end);
+        } catch (Exception e) {
+            log.error("ZSet倒序查询失败: key={}, start={}, end={}, error={}", 
+                     key, start, end, e.getMessage(), e);
+            return new java.util.LinkedHashSet<>();
+        }
+    }
+
+    /**
+     * 添加元素到ZSet
+     * @param key ZSet的key
+     * @param value 元素值
+     * @param score 分数
+     * @return 是否添加成功（true=新增，false=更新）
+     */
+    public Boolean zsetAdd(String key, String value, double score) {
+        try {
+            return stringRedisTemplate.opsForZSet().add(key, value, score);
+        } catch (Exception e) {
+            log.error("ZSet添加元素失败: key={}, value={}, score={}, error={}", 
+                     key, value, score, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 从ZSet删除元素
+     * @param key ZSet的key
+     * @param values 要删除的元素（可变参数）
+     * @return 删除的元素数量
+     */
+    public Long zsetRemove(String key, String... values) {
+        try {
+            return stringRedisTemplate.opsForZSet().remove(key, (Object[]) values);
+        } catch (Exception e) {
+            log.error("ZSet删除元素失败: key={}, error={}", key, e.getMessage(), e);
+            return 0L;
+        }
+    }
+
+    /**
+     * 获取ZSet的大小
+     * @param key ZSet的key
+     * @return 元素数量
+     */
+    public Long zSetSize(String key) {
+        try {
+            return stringRedisTemplate.opsForZSet().zCard(key);
+        } catch (Exception e) {
+            log.error("ZSet获取大小失败: key={}, error={}", key, e.getMessage(), e);
+            return 0L;
+        }
+    }
+
+    /**
+     * 删除ZSet中指定排名范围的元素（按score从低到高）
+     * @param key ZSet的key
+     * @param start 开始排名
+     * @param end 结束排名
+     * @return 删除的元素数量
+     */
+    public Long zsetRemoveRange(String key, long start, long end) {
+        try {
+            return stringRedisTemplate.opsForZSet().removeRange(key, start, end);
+        } catch (Exception e) {
+            log.error("ZSet删除范围失败: key={}, start={}, end={}, error={}", 
+                     key, start, end, e.getMessage(), e);
+            return 0L;
+        }
+    }
+
+    /**
+     * 批量添加元素到ZSet
+     * @param key ZSet的key
+     * @param scoreMembers Map<元素, 分数>
+     * @return 新增的元素数量
+     */
+    public Long zsetAddBatch(String key, Map<String, Double> scoreMembers) {
+        try {
+            Set<org.springframework.data.redis.core.ZSetOperations.TypedTuple<String>> tuples = new java.util.HashSet<>();
+            scoreMembers.forEach((member, score) -> {
+                tuples.add(new org.springframework.data.redis.core.DefaultTypedTuple<>(member, score));
+            });
+            return stringRedisTemplate.opsForZSet().add(key, tuples);
+        } catch (Exception e) {
+            log.error("ZSet批量添加失败: key={}, size={}, error={}", 
+                     key, scoreMembers.size(), e.getMessage(), e);
+            return 0L;
+        }
     }
 }

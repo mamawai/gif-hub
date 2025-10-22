@@ -15,9 +15,9 @@ public class CommentDTO {
     private Long gifId;
     
     /**
-     * 父评论ID（回复时必填，根评论时为null）
+     * 父评论ID（回复时必填，根评论时为null） -- 这里可以是回复根评论的ID 也可以是回复子评论的ID
      */
-    private Long parentId;
+    private String parentId;
     
     @NotBlank(message = "评论内容不能为空")
     @Size(max = 50, message = "评论内容不能超过50字符")

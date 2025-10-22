@@ -55,11 +55,18 @@ public class Comment implements Serializable {
     private Long userId;
 
     /**
-     * 父评论ID
+     * 父评论ID -- 表示子评论的父评论ID（这里可以是回复根评论的ID 也可以是回复子评论的ID）
      */
     @TableField("parent_id")
     @Schema(description = "父评论ID")
     private Long parentId;
+
+    /**
+     * 被回复者ID（冗余字段，避免自连接）
+     */
+    @TableField("parent_user_id")
+    @Schema(description = "被回复者ID")
+    private Long parentUserId;
 
     /**
      * 根评论ID
