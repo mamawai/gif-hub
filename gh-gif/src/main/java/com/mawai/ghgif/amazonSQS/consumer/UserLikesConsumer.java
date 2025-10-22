@@ -48,12 +48,13 @@ public class UserLikesConsumer implements MessageConsumer{
         // 判断是否poll的是空消息
         if (body.isBlank()) return;
 
-        String key = null;
+        // 幂等key
+        String idempotencyKey = null;
         UserLikesMessage ulMessage = null;
         try {
             ulMessage = JSONUtil.toBean(body, UserLikesMessage.class);
-            key = USER_LIKES_MSG + messageId;
-            Number value = cacheService.getNumber(key);
+            idempotencyKey = USER_LIKES_MSG + messageId;
+            Number value = cacheService.getNumber(idempotencyKey);
 
             // 幂等性校验
             if (value != null && value.longValue() == -1) {
@@ -65,22 +66,22 @@ public class UserLikesConsumer implements MessageConsumer{
             // 处理新增的点赞
             if (ulMessage.getNewLikes() != null && !ulMessage.getNewLikes().isEmpty()) {
                 userLikeService.insertOrUpdateBatchByUniqueKey(ulMessage.getNewLikes());
-                log.info("批量保存/更新{}条喜欢记录", ulMessage.getNewLikes().size());
+                log.info("用户{}批量保存/更新{}条喜欢记录",
+                        ulMessage.getUserId(),
+                        ulMessage.getNewLikes().size());
             }
             
             // 处理删除的点赞  
             if (ulMessage.getDeleteLikes() != null && !ulMessage.getDeleteLikes().isEmpty()) {
-                for (UserLike userLike : ulMessage.getDeleteLikes()) {
-                    LambdaQueryWrapper<UserLike> deleteWrapper = new LambdaQueryWrapper<>();
-                    deleteWrapper.eq(UserLike::getUserId, userLike.getUserId())
-                                .eq(UserLike::getGifId, userLike.getGifId());
-                    userLikeService.remove(deleteWrapper);
-                }
-                log.info("批量删除{}条不喜欢记录", ulMessage.getDeleteLikes().size());
+                // 批量删除
+                userLikeService.batchDelete(ulMessage.getDeleteLikes());
+                log.info("用户{}批量删除{}条喜欢记录",
+                        ulMessage.getUserId(),
+                        ulMessage.getDeleteLikes().size());
             }
 
             // 注册事务提交后的回调 - 确保只有在数据库事务成功提交后才删除SQS消息
-            String finalKey = key;
+            String finalKey = idempotencyKey;
             registerAfterCommit(() -> {
                 try {
                     messageService.deleteMessage(message.receiptHandle(), queueUrl);
@@ -95,8 +96,8 @@ public class UserLikesConsumer implements MessageConsumer{
         } catch (Exception e) {
             log.error("处理用户点赞消息失败，Message信息: {}", message, e);
             Long times = null;
-            if (key != null) {
-                times = cacheService.increment(key, 1);
+            if (idempotencyKey != null) {
+                times = cacheService.increment(idempotencyKey, 1);
             }
             if (ulMessage != null && times != null && times == 3) {
                 SpringUtils.getAopProxy(this).handleProcessingFailure(ulMessage);
@@ -111,12 +112,12 @@ public class UserLikesConsumer implements MessageConsumer{
      */
     private void handleProcessingFailure(UserLikesMessage ulMessage) {
         ulMessage.getNewLikes().forEach(like ->
-                gifProcessService.updateLikeCount(
+                gifProcessService.toggleGifLike(
                         String.valueOf(like.getGifId()), like.getUserLikeCategoryId(), like.getUserId(), true
                 )
         );
         ulMessage.getDeleteLikes().forEach(dislike ->
-                gifProcessService.updateLikeCount(
+                gifProcessService.toggleGifLike(
                         String.valueOf(dislike.getGifId()), dislike.getUserLikeCategoryId(), dislike.getUserId(), false
                 )
         );

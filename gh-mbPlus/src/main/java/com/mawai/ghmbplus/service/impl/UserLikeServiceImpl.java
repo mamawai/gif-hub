@@ -42,4 +42,13 @@ public class UserLikeServiceImpl extends ServiceImpl<UserLikeMapper, UserLike> i
             return false;
         }
     }
+
+    @Override
+    public void batchDelete(List<UserLike> userLikes) {
+        try {
+            this.baseMapper.batchDelete(userLikes);
+        } catch (Exception e) {
+            log.error("批量删除用户点赞记录失败: {}", e.getMessage(), e);
+        }   
+    }
 }

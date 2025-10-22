@@ -302,7 +302,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @return 是否更新成功
      */
     @Override
-    public boolean updateLikeCount(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike) {
+    public boolean toggleGifLike(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike) {
         try {
             // 创建redisKey
             String countKey = LIKE_COUNT_KEY + fileId;
@@ -648,37 +648,33 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @param fileId GIF文件的唯一标识符
      * @param userId 用户的唯一标识符
      * @return {@code true} 用户喜欢该GIF，{@code false} 用户不喜欢该GIF
-     * @see #updateLikeCount(String, Long, Long, Boolean) 更新用户点赞状态方法
+     * @see #toggleGifLike(String, Long, Long, Boolean) 更新用户点赞状态方法
      */
     @Override
     public boolean isLikeThis(String fileId, Long userId) {
-        // 喜欢hashKey
-        String userLikeCategoryKey = USER_LIKE_CATEGORY_KEY + userId;
-        // 不喜欢setKey
-        String userDislikeKey = USER_DISLIKE_KEY + userId;
+        String userLikeCategoryKey = USER_LIKE_CATEGORY_KEY + userId; // 喜欢hashKey
+        String userDislikeKey = USER_DISLIKE_KEY + userId; // 不喜欢setKey
 
-        if (!cacheService.hasKey(userLikeCategoryKey) && !cacheService.hasKey(userDislikeKey)) {
-            // 如果没有 userLikeCategoryKey 或者 userDislikeKey 直接查数据库
-            return userLikeService.existsByUserIdAndGifId(userId, Long.parseLong(fileId));
-        }
-
+        // 先查询缓存
         Map<String, Long> likeCategoryHash = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey, false);
         Set<String> disLikeSet = cacheService.getStringSetSafely(userDislikeKey, false);
 
-        if (likeCategoryHash.containsKey(fileId)) {
+        // key不存在会返回空的数据结构比如空map或者空set
+        if (!likeCategoryHash.isEmpty() && likeCategoryHash.containsKey(fileId)) {
             return true;
-        } else if (disLikeSet.contains(fileId)) {
+        } else if (!disLikeSet.isEmpty() && disLikeSet.contains(fileId)) {
             return false;
         } else {
-            // 查询oldKey
+            // 查询oldKey缓存
             Map<String, Long> oldLikeCategoryHash = cacheService.getLikeCategoryIdsSafely(userLikeCategoryKey + ":old", false);
             Set<String> oldDisLikeSet = cacheService.getStringSetSafely(userDislikeKey + ":old", false);
 
-            if (oldLikeCategoryHash.containsKey(fileId)) {
+            if (!oldLikeCategoryHash.isEmpty() && oldLikeCategoryHash.containsKey(fileId)) {
                 return true;
-            } else if (oldDisLikeSet.contains(fileId)) {
+            } else if (!oldDisLikeSet.isEmpty() && oldDisLikeSet.contains(fileId)) {
                 return false;
             } else {
+                // 最后查询数据库
                 return userLikeService.existsByUserIdAndGifId(userId, Long.parseLong(fileId));
             }
         }

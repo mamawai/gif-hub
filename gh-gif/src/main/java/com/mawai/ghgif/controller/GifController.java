@@ -133,14 +133,14 @@ public class GifController {
      * @param likeRequestDTO 点赞请求，包含文件ID、分类ID和点赞状态
      * @return 操作结果
      */
-    @Operation(summary = "更新点赞次数", description = "更新点赞次数")
+    @Operation(summary = "点赞或取消点赞GIF", description = "点赞或取消点赞GIF")
     @PostMapping("/likeOrDislike")
     public ApiResponse<Boolean> likeOrDislike(@RequestBody LikeRequestDTO likeRequestDTO) {
         try {
             // 获取当前登录用户ID
-            Long userId = StpUtil.getLoginIdAsLong();
+            Long userId = StpUtil.getLoginIdAsLong();   
             
-            boolean result = gifProcessService.updateLikeCount(
+            boolean result = gifProcessService.toggleGifLike(
                     likeRequestDTO.getFileId(),
                     likeRequestDTO.getUserLikeCategoryId(),
                     userId,

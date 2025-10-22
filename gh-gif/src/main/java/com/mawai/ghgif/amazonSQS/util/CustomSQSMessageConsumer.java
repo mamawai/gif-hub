@@ -39,6 +39,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     ExecutorService vte = Executors.newVirtualThreadPerTaskExecutor();
 
     private final SqsClient sqsClient;
+
     /**
      * -- GETTER --
      *  获取队列URL

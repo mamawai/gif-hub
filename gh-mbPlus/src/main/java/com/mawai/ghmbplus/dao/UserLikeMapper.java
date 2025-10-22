@@ -37,4 +37,12 @@ public interface UserLikeMapper extends BaseMapper<UserLike> {
      * @return 存在返回true，不存在返回false
      */
     boolean existsByUserIdAndGifId(@Param("userId") Long userId, @Param("gifId") Long gifId);
+
+    /**
+     * 批量删除用户点赞记录
+     * 
+     * @param userLikes 用户点赞记录列表
+     * @return 影响的行数
+     */
+    int batchDelete(@Param("list") List<UserLike> userLikes);
 }

@@ -32,4 +32,11 @@ public interface UserLikeService extends IService<UserLike> {
      * @return 存在返回true，不存在返回false
      */
     boolean existsByUserIdAndGifId(Long userId, Long gifId);
+
+    /**
+     * 批量删除用户点赞记录
+     * 
+     * @param userLikes 用户点赞记录列表
+     */
+    void batchDelete(List<UserLike> userLikes);
 }

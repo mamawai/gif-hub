@@ -10,6 +10,8 @@ import java.util.List;
 
 /**
  * GIF处理服务接口
+ *
+ * @author mawai
  */
 public interface GifProcessService {
 
@@ -64,7 +66,7 @@ public interface GifProcessService {
      * @param isLike true-点赞，false-取消点赞
      * @return 是否操作成功
      */
-    boolean updateLikeCount(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike);
+    boolean toggleGifLike(String fileId, Long userLikeCategoryId, Long userId, Boolean isLike);
 
     /**
      * 按分类分页获取用户喜欢的GIF列表

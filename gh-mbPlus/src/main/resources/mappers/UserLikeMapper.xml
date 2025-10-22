@@ -20,4 +20,12 @@
         )
     </select>
 
+    <!-- 批量删除用户点赞记录 -->
+    <delete id="batchDelete" parameterType="java.util.List">
+        DELETE FROM user_like
+        WHERE (user_id, gif_id) IN
+        <foreach collection="list" item="item" open="(" separator="," close=")">
+            (#{item.userId}, #{item.gifId})
+        </foreach>
+    </delete>
 </mapper>
