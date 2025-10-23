@@ -1,6 +1,5 @@
 package com.mawai.ghweixin.service;
 
-import com.mawai.ghweixin.vo.LoginResultVO;
 import com.mawai.ghweixin.dto.UserInfoDTO;
 
 /**

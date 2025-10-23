@@ -4,7 +4,6 @@ import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dto.ChildCommentBO;
 import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
-import com.mawai.ghmbplus.model.Comment;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 

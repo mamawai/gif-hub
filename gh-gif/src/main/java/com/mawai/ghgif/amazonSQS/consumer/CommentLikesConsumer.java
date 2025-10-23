@@ -4,7 +4,6 @@ import cn.hutool.json.JSONUtil;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.CommentLikesMessage;
-import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.CommentProcessService;
 import com.mawai.ghgif.service.MessageService;
@@ -14,8 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.util.concurrent.TimeUnit;
@@ -39,8 +36,7 @@ public class CommentLikesConsumer implements MessageConsumer {
     private final CommentProcessService commentProcessService;
     
     private static final String COMMENT_LIKES_MSG_KEY = "commentlikes:msg:";
-    private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:";
-    
+
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;
 

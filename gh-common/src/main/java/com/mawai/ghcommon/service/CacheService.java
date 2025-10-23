@@ -892,9 +892,9 @@ public class CacheService {
      */
     public Long zsetAddBatch(String key, Map<String, Double> scoreMembers) {
         try {
-            Set<org.springframework.data.redis.core.ZSetOperations.TypedTuple<String>> tuples = new java.util.HashSet<>();
+            Set<ZSetOperations.TypedTuple<String>> tuples = new HashSet<>();
             scoreMembers.forEach((member, score) -> {
-                tuples.add(new org.springframework.data.redis.core.DefaultTypedTuple<>(member, score));
+                tuples.add(new DefaultTypedTuple<>(member, score));
             });
             return stringRedisTemplate.opsForZSet().add(key, tuples);
         } catch (Exception e) {

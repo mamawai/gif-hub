@@ -24,6 +24,13 @@ import java.util.function.Consumer;
 /**
  * 评论消息消费者
  * 
+ * <p><b>缓存策略</b>：</p>
+ * <ul>
+ *   <li>新增评论时，只写数据库，<b>不修改 ZSet 缓存</b></li>
+ *   <li>前端强制顺序分页，ZSet 会逐步累积数据</li>
+ *   <li>查询时检测到 ZSet 数据不足，会自动查询数据库并追加</li>
+ * </ul>
+ * 
  * @author mawai
  */
 @Slf4j

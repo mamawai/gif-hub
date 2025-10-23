@@ -1,5 +1,6 @@
 package com.mawai.ghgif.service.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.amazonSQS.message.CommentMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
@@ -101,7 +102,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         // 发送到SQS
         try {
             messageService.send(
-                cn.hutool.json.JSONUtil.toJsonStr(commentMessage), 
+                JSONUtil.toJsonStr(commentMessage),
                 SQS_QUEUE_URL,
                 MessageType.COMMENT_MESSAGE
             );
@@ -430,6 +431,17 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     /**
      * 从 ZSet 按页码获取评论ID列表（使用 ZRANGE 按索引）
      * 
+     * <p><b>设计前提</b>：前端强制顺序分页，不允许跳页查询</p>
+     * 
+     * <p><b>工作原理</b>：</p>
+     * <ul>
+     *   <li>第 1 页查询：ZSet 为空 → 查 DB [1-10] → 写入 ZSet [1-10]</li>
+     *   <li>第 2 页查询：ZSet 有 [1-10] → 读取索引 10-19 → 返回空或不足 → 查 DB [11-20] → 追加到 ZSet [1-20]</li>
+     *   <li>第 N 页查询：ZSet 逐步累积 [1-N*10]</li>
+     * </ul>
+     * 
+     * <p><b>关键点</b>：调用方必须检测返回数据量是否 < limit，如果不足则查询数据库补充</p>
+     * 
      * @param zsetKey ZSet的key
      * @param page 页码（从1开始）
      * @param limit 每页数量
@@ -438,7 +450,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private Set<String> getCommentIdsFromZSetByPage(String zsetKey, int page, int limit) {
         try {
             // 计算索引范围
-            long start = (long) (page - 1) * limit;
+            // 常规分页就是10条一页，所以这里就是page * 10 - limit
+            // 如果limit小于10说明当时请求的是最后一页，这时可能有新评论，所以要从page*10-limit开始查询
+            long start = page * 10L - limit;
             long end = start + limit - 1;
             
             // 使用 ZRANGE 按索引查询
@@ -620,7 +634,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * <ol>
      *   <li>用 page 从 ZSet 按索引查询 (ZRANGE)</li>
      *   <li>ZSet 有数据 → 返回</li>
-     *   <li>ZSet 无数据 → 用 cursor 从 DB 查询 → 写回 ZSet</li>
+     *   <li>ZSet 无数据或数据不充足 → 用 cursor 从 DB 查询（为了防止缓存数据不完整） → 写回 ZSet</li>
      * </ol>
      * 
      * @param gifId GIF ID
@@ -646,41 +660,55 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         }
         
         String zsetKey = COMMENT_ROOT_KEY + gifId;
-        // 1. 先用 page 从 ZSet 按索引查询（调整查询数量）
+        
+        // 先用 page 从 ZSet 按索引查询
         Set<String> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
 
         List<CommentVO> comments;
         
-        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
-            // ZSet 缓存命中
+        // 优化：检查缓存数据是否足够
+        boolean cacheDataInsufficient = (commentIdsFromCache == null || commentIdsFromCache.size() < limit);
+        
+        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty() && !cacheDataInsufficient) {
+            // ZSet 缓存命中且数据充足
             comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache));
-            log.info("根评论ZSet缓存命中: gifId={}, page={}, size={}", gifId, page, comments.size());
+            log.info("根评论ZSet缓存完全命中: gifId={}, page={}, size={}", gifId, page, comments.size());
         } else {
-            // ZSet 未命中（该页没有缓存），使用分布式锁从DB查询
+            // ZSet 未命中或数据不充足，从DB查询
             String lockKey = LOCK_COMMENT_ROOT_KEY + gifId + ":page:" + page;
             boolean locked = cacheService.setIfAbsent(lockKey, "1", LOCK_WAIT_TIME, TimeUnit.SECONDS);
             
             if (locked) {
                 try {
                     // 获得锁，用 cursor 从数据库查询
+                    // 注意：DB 查询可能返回与缓存重复的数据（因为 cursor 是上一页最后一条的 createdAt）
+                    // 但 ZSet 会自动去重（member 相同），所以直接追加即可，如果要从缓存的cursor处开始查询，还需要获取该cursor
                     List<RootCommentBO> rootCommentBOs = commentMapper.selectRootCommentsByCursor(
                             Long.parseLong(gifId), cursor, limit
                     );
-                    
+
                     if (rootCommentBOs.isEmpty()) {
-                        return new ArrayList<>();
+                        // DB 没有新数据，说明已到达末尾
+                        // 但缓存可能有部分数据（最后一页不足 limit 条），需要返回
+                        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
+                            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache));
+                            log.info("根评论已到末尾，返回缓存中的部分数据: gifId={}, page={}, size={}", 
+                                    gifId, page, comments.size());
+                        } else {
+                            return new ArrayList<>();
+                        }
+                    } else {
+                        // DB 有数据，直接使用（ZSet 会自动去重重复的评论）
+                        comments = rootCommentBOs.stream()
+                                .map(commentParamMapper::boToCommentVO)
+                                .toList();
+                        
+                        // 追加到 ZSet 缓存（顺序分页，逐步累积，自动去重）
+                        appendToRootCommentZSet(gifId, rootCommentBOs);
+                        
+                        log.info("根评论从DB查询并追加到ZSet: gifId={}, page={}, cursor={}, size={}", 
+                                gifId, page, cursor, comments.size());
                     }
-                    
-                    // 转换为 CommentVO
-                    comments = rootCommentBOs.stream()
-                            .map(commentParamMapper::boToCommentVO)
-                            .toList();
-                    
-                    // 写回 ZSet 缓存
-                    appendToRootCommentZSet(gifId, rootCommentBOs);
-                    
-                    log.info("根评论从DB查询并写回ZSet: gifId={}, page={}, cursor={}, size={}", 
-                            gifId, page, cursor, comments.size());
                 } finally {
                     // 释放锁
                     cacheService.delete(lockKey);
@@ -704,7 +732,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * <ol>
      *   <li>用 page 从 ZSet 按索引查询 (ZRANGE)</li>
      *   <li>ZSet 有数据 → 返回</li>
-     *   <li>ZSet 无数据 → 用 cursor 从 DB 查询 → 写回 ZSet</li>
+     *   <li>ZSet 无数据或数据不充足 → 用 cursor 从 DB 查询 → 写回 ZSet</li>
      * </ol>
      * 
      * @param rootCommentId 根评论ID
@@ -731,41 +759,55 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         String zsetKey = COMMENT_CHILD_KEY + rootCommentId;
         
-        // 1. 先用 page 从 ZSet 按索引查询
+        // 先用 page 从 ZSet 按索引查询
         Set<String> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
         
-        List<CommentVO> comments;
+        List<CommentVO> comments = new ArrayList<>();
         
-        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
-            // ZSet 缓存命中
+        // 优化：检查缓存数据是否足够
+        // 如果缓存返回的数据量 < limit，说明 ZSet 数据不完整，需要查询数据库
+        boolean cacheDataInsufficient = (commentIdsFromCache == null || commentIdsFromCache.size() < limit);
+        
+        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty() && !cacheDataInsufficient) {
+            // ZSet 缓存命中且数据充足
             comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache));
-            log.info("子评论ZSet缓存命中: rootId={}, page={}, size={}", rootCommentId, page, comments.size());
+            log.info("子评论ZSet缓存完全命中: rootId={}, page={}, size={}", rootCommentId, page, comments.size());
         } else {
-            // ZSet 未命中（该页没有缓存），使用分布式锁从DB查询
+            // ZSet 未命中或数据不足，使用分布式锁从DB查询
             String lockKey = LOCK_COMMENT_CHILD_KEY + rootCommentId + ":page:" + page;
             boolean locked = cacheService.setIfAbsent(lockKey, "1", LOCK_WAIT_TIME, TimeUnit.SECONDS);
             
             if (locked) {
                 try {
                     // 获得锁，用 cursor 从数据库查询
+                    // 注意：DB 查询可能返回与缓存重复的数据（因为 cursor 是上一页最后一条的 createdAt）
+                    // 但 ZSet 会自动去重（member 相同），所以直接追加即可，如果要从缓存的cursor处开始查询，还需要获取该cursor
                     List<ChildCommentBO> childCommentBOs = commentMapper.selectChildCommentsByCursor(
                             Long.parseLong(rootCommentId), cursor, limit
                     );
-                    
+
                     if (childCommentBOs.isEmpty()) {
-                        return new ArrayList<>();
+                        // DB 没有新数据，说明已到达末尾
+                        // 但缓存可能有部分数据（最后一页不足 limit 条），需要返回
+                        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
+                            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache));
+                            log.info("子评论已到末尾，返回缓存中的部分数据: rootId={}, page={}, size={}", 
+                                    rootCommentId, page, comments.size());
+                        } else {
+                            return new ArrayList<>();
+                        }
+                    } else {
+                        // DB 有数据，直接使用（ZSet 会自动去重重复的评论）
+                        comments = childCommentBOs.stream()
+                                .map(commentParamMapper::childBoToCommentVO)
+                                .toList();
+                        
+                        // 追加到 ZSet 缓存（顺序分页，逐步累积，自动去重）
+                        appendToChildCommentZSet(rootCommentId, childCommentBOs);
+                        
+                        log.info("子评论从DB查询并追加到ZSet: rootId={}, page={}, cursor={}, size={}", 
+                                rootCommentId, page, cursor, comments.size());
                     }
-                    
-                    // 转换为 CommentVO
-                    comments = childCommentBOs.stream()
-                            .map(commentParamMapper::childBoToCommentVO)
-                            .toList();
-                    
-                    // 写回 ZSet 缓存（追加这一页的数据）
-                    appendToChildCommentZSet(rootCommentId, childCommentBOs);
-                    
-                    log.info("子评论从DB查询并写回ZSet: rootId={}, page={}, cursor={}, size={}", 
-                            rootCommentId, page, cursor, comments.size());
                 } finally {
                     // 释放锁
                     cacheService.delete(lockKey);

@@ -1,14 +1,12 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.json.JSONUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.MessageService;
-import com.mawai.ghmbplus.model.UserLike;
 import com.mawai.ghmbplus.service.UserLikeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
