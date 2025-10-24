@@ -741,12 +741,12 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 更新查看次数 -- 每人每分钟对于一个GIF文件的查看次数最多为3次超过3次的不计数
+     * 更新查看次数 -- 每人每分钟最多增加5次浏览量，不管看多少个不同的GIF
      * @param fileId 文件名
      * @return 是否更新成功
      */
     @Override
-    @RateLimiter(permitsPerSecond = (3 / 60.0), bucketCapacity = 3, message = "更新查看次数频繁", type = RateLimiterType.VIEW, businessKeyParamName = "fileId")
+    @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "更新查看次数频繁", type = RateLimiterType.VIEW)
     public boolean updateViewCount(String fileId) {
         // 查看次数+1 并设置过期时间
         cacheService.increment(VIEW_COUNT_KEY + fileId, 1, EXPIRE_TIME, TimeUnit.MINUTES);
