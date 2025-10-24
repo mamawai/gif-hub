@@ -112,7 +112,7 @@ public class GifMessageConsumer implements MessageConsumer {
             }
             // 记录失败信息 -- 等待clearDeletedGifs删除r2文件
             // 通过代理调用，确保事务注解生效
-            // 要等times为 3 才处理
+            // 要等times为 3 才处理 因为SQS重试机制会重试3次，3次后路由到死信队列
             if (gifMessage != null && times != null && times == 3) {
                 SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
             }
@@ -191,7 +191,7 @@ public class GifMessageConsumer implements MessageConsumer {
     }
 
     /**
-     * 处理处理失败的情况
+     * handle处理失败的情况
      * 使用独立事务，确保失败记录不会被主事务回滚影响
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)

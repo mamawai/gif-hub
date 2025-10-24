@@ -6,7 +6,6 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityRequest;
-import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.QueueDoesNotExistException;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
@@ -103,7 +102,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
      */
     @SuppressWarnings("BusyWait")
     private void pollMessages(int threadId) {
-        log.debug("轮询线程-{} 开始运行", threadId);
+        log.info("轮询线程-{} 开始运行", threadId);
         try {
             while (!Thread.interrupted() && !shuttingDown.get()) {
                 try {
@@ -143,7 +142,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
             }
         } finally {
             terminated.countDown();
-            log.debug("轮询线程-{} 已停止", threadId);
+            log.info("轮询线程-{} 已停止", threadId);
         }
     }
 
@@ -175,7 +174,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
             // 如果正在关闭，将消息可见性设置为0，让其他消费者可以立即处理
             try {
                 changeMessageVisibilityZero(message);
-                log.debug("消费者关闭中，重置消息可见性: {}", message.messageId());
+                log.info("消费者关闭中，重置消息可见性: {}", message.messageId());
             } catch (Exception e) {
                 log.warn("重置消息可见性失败: {}", message.messageId(), e);
             }
@@ -194,10 +193,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
             // 使用找到的处理器处理消息
             messageConsumer.handleMessage().accept(message);
             
-            // 处理成功，删除消息
-            deleteMessage(message);
-            log.debug("消息处理成功并删除: {}", message.messageId());
-            
+            log.info("消息处理完成，等待事务提交后删除: {}", message.messageId());
         } catch (QueueDoesNotExistException e) {
             log.warn("队列不存在，忽略消息: {}", message.messageId());
         } catch (Exception e) {
@@ -216,17 +212,6 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
                 exceptionHandler.accept(visibilityException);
             }
         }
-    }
-
-    /**
-     * 删除消息
-     */
-    private void deleteMessage(Message message) {
-        DeleteMessageRequest request = DeleteMessageRequest.builder()
-                .queueUrl(queueUrl)
-                .receiptHandle(message.receiptHandle())
-                .build();
-        sqsClient.deleteMessage(request);
     }
 
     /**

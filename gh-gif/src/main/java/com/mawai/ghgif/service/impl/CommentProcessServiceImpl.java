@@ -560,9 +560,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                 resultMap.put(String.valueOf(bo.getId()), vo);
             }
             
-            log.debug("子评论缓存命中:{}, 未命中:{}", commentIds.size() - missedIds.size(), missedIds.size());
+            log.info("子评论缓存命中:{}, 未命中:{}", commentIds.size() - missedIds.size(), missedIds.size());
         } else {
-            log.debug("子评论全部缓存命中: {}", commentIds.size());
+            log.info("子评论全部缓存命中: {}", commentIds.size());
         }
         
         // 4. 按照原始commentIds的顺序返回

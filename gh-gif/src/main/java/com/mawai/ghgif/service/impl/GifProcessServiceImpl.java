@@ -134,7 +134,6 @@ public class GifProcessServiceImpl implements GifProcessService {
         try {
             cacheService.decrement(TOTAL_GIF_COUNT_KEY, 1);
             cacheService.decrement(TOTAL_GIF_COUNT_KEY + ":" + userId, 1, 60, TimeUnit.MINUTES);
-            log.debug("GIF总数-1");
         } catch (Exception e) {
             log.error("减少GIF总数失败: {}", e.getMessage(), e);
         }
