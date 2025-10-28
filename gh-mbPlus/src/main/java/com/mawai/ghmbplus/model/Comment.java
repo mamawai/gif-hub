@@ -34,10 +34,10 @@ public class Comment implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * 评论ID
+     * 评论ID（使用雪花算法生成）
      */
     @Schema(description = "评论ID")
-    @TableId(value = "id", type = IdType.AUTO)
+    @TableId(value = "id", type = IdType.ASSIGN_ID)
     private Long id;
 
     /**

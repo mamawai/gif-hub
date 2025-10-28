@@ -23,6 +23,11 @@ public class CommentMessage implements Serializable {
     private static final long serialVersionUID = 1L;
     
     /**
+     * 预生成的评论ID（使用雪花算法）
+     */
+    private Long commentId;
+    
+    /**
      * 用户ID
      */
     private Long userId;

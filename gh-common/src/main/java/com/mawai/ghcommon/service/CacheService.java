@@ -721,6 +721,17 @@ public class CacheService {
     }
 
     /**
+     * 获取有序集合指定范围的元素（带分数）
+     * @param key 键
+     * @param start 开始索引
+     * @param end 结束索引
+     * @return 元素列表
+     */
+    public Set<ZSetOperations.TypedTuple<String>> zRangeWithScores(String key, long start, long end) {
+        return stringRedisTemplate.opsForZSet().rangeWithScores(key, start, end);
+    }
+
+    /**
      * 替换热门标签
      *
      * @param args 参数

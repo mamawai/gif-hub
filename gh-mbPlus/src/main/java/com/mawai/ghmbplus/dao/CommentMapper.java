@@ -1,10 +1,10 @@
 package com.mawai.ghmbplus.dao;
 
 import com.mawai.ghmbplus.dto.ChildCommentBO;
+import com.mawai.ghmbplus.dto.ChildCountBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import com.mawai.ghmbplus.model.Comment;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import org.apache.ibatis.annotations.MapKey;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -44,10 +44,9 @@ public interface CommentMapper extends BaseMapper<Comment> {
     /**
      * 批量查询根评论的子评论数量
      * @param rootCommentIds 根评论ID列表
-     * @return Map<根评论ID, 子评论数量>
+     * @return 子评论数量统计列表
      */
-    @MapKey("root_comment_id")
-    Map<Long, Integer> countChildCommentsBatch(@Param("rootCommentIds") List<Long> rootCommentIds);
+    List<ChildCountBO> countChildCommentsBatch(@Param("rootCommentIds") List<Long> rootCommentIds);
 
     /**
      * 使用游标查询子评论列表（按时间由远到近）

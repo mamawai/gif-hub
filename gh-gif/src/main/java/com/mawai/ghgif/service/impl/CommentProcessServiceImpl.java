@@ -1,6 +1,7 @@
 package com.mawai.ghgif.service.impl;
 
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.amazonSQS.message.CommentMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
@@ -15,6 +16,7 @@ import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
 import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dto.ChildCommentBO;
+import com.mawai.ghmbplus.dto.ChildCountBO;
 import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import com.mawai.ghmbplus.model.Comment;
@@ -25,15 +27,18 @@ import cn.hutool.core.util.StrUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * 评论处理服务实现类
@@ -79,11 +84,11 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * 
      * @param commentDTO 评论DTO
      * @param userId 用户ID
-     * @return 是否成功发送SQS消息
+     * @return 包含预生成评论ID的CommentVO
      */
     @Override
     @RateLimiter(permitsPerSecond = (3 / 60.0), bucketCapacity = 3, message = "评论过于频繁", type = RateLimiterType.COMMENT)
-    public Boolean addComment(CommentDTO commentDTO, Long userId) {
+    public CommentVO addComment(CommentDTO commentDTO, Long userId) {
         // 参数校验
         if (commentDTO == null) {
             throw new IllegalArgumentException("参数不能为空");
@@ -92,27 +97,36 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new IllegalArgumentException("评论内容不能为空");
         }
 
-        // 构建CommentMessage
+        // 1. 预生成评论ID（使用雪花算法）
+        Long commentId = IdWorker.getId();
+
+        // 2. 构建CommentMessage
         CommentMessage commentMessage = new CommentMessage();
+        commentMessage.setCommentId(commentId);  // ✅ 设置预生成的ID
         commentMessage.setUserId(userId);
         commentMessage.setGifId(commentDTO.getGifId());
         commentMessage.setContent(commentDTO.getContent().trim());
         commentMessage.setParentId(commentDTO.getParentId());
 
-        // 发送到SQS
+        // 3. 发送到SQS
         try {
             messageService.send(
                 JSONUtil.toJsonStr(commentMessage),
                 SQS_QUEUE_URL,
                 MessageType.COMMENT_MESSAGE
             );
-            log.info("评论消息发送成功: userId={}, gifId={}", userId, commentDTO.getGifId());
-            return true;
+            log.info("评论消息发送成功: userId={}, commentId={}, gifId={}", 
+                    userId, commentId, commentDTO.getGifId());
         } catch (Exception e) {
-            log.error("评论消息发送失败: userId={}, gifId={}, error={}", 
-                    userId, commentDTO.getGifId(), e.getMessage(), e);
+            log.error("评论消息发送失败: userId={}, commentId={}, gifId={}, error={}", 
+                    userId, commentId, commentDTO.getGifId(), e.getMessage(), e);
             throw new RuntimeException("评论提交失败，请稍后重试", e);
         }
+        
+        // 4. 返回包含ID的CommentVO（简化版本，只包含id）
+        CommentVO commentVO = new CommentVO();
+        commentVO.setId(String.valueOf(commentId));
+        return commentVO;
     }
 
     /**
@@ -130,7 +144,10 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         List<Long> rootCommentIds = comments.stream()
                 .map(vo -> Long.parseLong(vo.getId()))
                 .toList();
-        Map<Long, Integer> childCountMap = commentMapper.countChildCommentsBatch(rootCommentIds);
+        List<ChildCountBO> childCountBoList = commentMapper.countChildCommentsBatch(rootCommentIds);
+        // toMap 查询速度快
+        Map<Long, Integer> childCountMap = childCountBoList.stream()
+                .collect(Collectors.toMap(ChildCountBO::getRootCommentId, ChildCountBO::getChildCount));
         
         for (CommentVO vo : comments) {
             vo.setChildCount(childCountMap.get(Long.parseLong(vo.getId())));
@@ -447,16 +464,21 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @param limit 每页数量
      * @return 评论ID集合（按时间由远到近排序）
      */
-    private Set<String> getCommentIdsFromZSetByPage(String zsetKey, int page, int limit) {
+    private LinkedHashMap<String, Double> getCommentIdsFromZSetByPage(String zsetKey, int page, int limit) {
         try {
             // 计算索引范围
             // 常规分页就是10条一页，所以这里就是page * 10 - limit
             // 如果limit小于10说明当时请求的是最后一页，这时可能有新评论，所以要从page*10-limit开始查询
             long start = page * 10L - limit;
             long end = start + limit - 1;
-            
-            // 使用 ZRANGE 按索引查询
-            return cacheService.zRange(zsetKey, start, end);
+
+            LinkedHashMap<String, Double> res = new LinkedHashMap<>();
+            // 使用 zRangeWithScores 分页查询（按 score 升序返回）
+            Set<ZSetOperations.TypedTuple<String>> tuples = cacheService.zRangeWithScores(zsetKey, start, end);
+            for (ZSetOperations.TypedTuple<String> tuple : tuples) {
+                res.put(tuple.getValue(), tuple.getScore());
+            }
+            return res;
         } catch (Exception e) {
             log.error("从ZSet按页码获取评论ID失败: key={}, page={}, limit={}, error={}", 
                      zsetKey, page, limit, e.getMessage(), e);
@@ -515,7 +537,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         return commentIds.stream()
                 .map(resultMap::get)
                 .filter(Objects::nonNull)
-                .toList();
+                .collect(Collectors.toList());
     }
     
     /**
@@ -569,11 +591,11 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         return commentIds.stream()
                 .map(resultMap::get)
                 .filter(Objects::nonNull)
-                .toList();
+                .collect(Collectors.toList());
     }
     
     /**
-     * 追加根评论到ZSet缓存
+     * 追加根评论到ZSet缓存 并设置detail_cache
      * 
      * @param gifId GIF ID
      * @param rootCommentBOs 根评论BO列表
@@ -589,12 +611,16 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
-            // 批量添加到ZSet
+            // 批量添加到ZSet 设置过期时间
             cacheService.zsetAddBatch(zsetKey, scoreMembers);
-            
-            // 设置过期时间
             cacheService.expire(zsetKey, ZSET_CACHE_TTL, TimeUnit.MINUTES);
             
+            // 遍历所有ID，设置detail_cache
+            for (RootCommentBO bo : rootCommentBOs) {
+                String cacheKey = COMMENT_DETAIL_ROOT_KEY + bo.getId();
+                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+            }
+
             log.info("追加根评论到ZSet: gifId={}, count={}", gifId, rootCommentBOs.size());
         } catch (Exception e) {
             log.error("追加根评论到ZSet失败: gifId={}, error={}", gifId, e.getMessage(), e);
@@ -602,7 +628,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 追加子评论到ZSet缓存
+     * 追加子评论到ZSet缓存 并设置detail_cache
      */
     private void appendToChildCommentZSet(String rootCommentId, List<ChildCommentBO> childCommentBOs) {
         try {
@@ -615,11 +641,15 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
-            // 批量添加到ZSet
+            // 批量添加到ZSet 设置过期时间
             cacheService.zsetAddBatch(zsetKey, scoreMembers);
-            
-            // 设置过期时间
             cacheService.expire(zsetKey, ZSET_CACHE_TTL, TimeUnit.MINUTES);
+
+            // 遍历所有ID，设置detail_cache
+            for (ChildCommentBO bo : childCommentBOs) {
+                String cacheKey = COMMENT_DETAIL_CHILD_KEY + bo.getId();
+                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+            }
             
             log.info("追加子评论到ZSet: rootId={}, count={}", rootCommentId, childCommentBOs.size());
         } catch (Exception e) {
@@ -662,7 +692,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         String zsetKey = COMMENT_ROOT_KEY + gifId;
         
         // 先用 page 从 ZSet 按索引查询
-        Set<String> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
+        Map<String, Double> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
 
         List<CommentVO> comments;
         
@@ -671,27 +701,30 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty() && !cacheDataInsufficient) {
             // ZSet 缓存命中且数据充足
-            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache));
+            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
             log.info("根评论ZSet缓存完全命中: gifId={}, page={}, size={}", gifId, page, comments.size());
         } else {
-            // ZSet 未命中或数据不充足，从DB查询
+            // ZSet 未命中或数据可能不充足，从DB查询
             String lockKey = LOCK_COMMENT_ROOT_KEY + gifId + ":page:" + page;
             boolean locked = cacheService.setIfAbsent(lockKey, "1", LOCK_WAIT_TIME, TimeUnit.SECONDS);
             
             if (locked) {
                 try {
-                    // 获得锁，用 cursor 从数据库查询
+                    // 获得锁
+                    // 用 cursor 从数据库查询 -- 注意：cursor应该是commentIdsFromCache中最后一个
                     // 注意：DB 查询可能返回与缓存重复的数据（因为 cursor 是上一页最后一条的 createdAt）
                     // 但 ZSet 会自动去重（member 相同），所以直接追加即可，如果要从缓存的cursor处开始查询，还需要获取该cursor
+                    cursor = getCursor(cursor, commentIdsFromCache);
+
                     List<RootCommentBO> rootCommentBOs = commentMapper.selectRootCommentsByCursor(
                             Long.parseLong(gifId), cursor, limit
                     );
 
                     if (rootCommentBOs.isEmpty()) {
                         // DB 没有新数据，说明已到达末尾
-                        // 但缓存可能有部分数据（最后一页不足 limit 条），需要返回
+                        // 但缓存commentIdsFromCache中可能有数据（最后一页不足 limit 条），需要返回
                         if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
-                            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache));
+                            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
                             log.info("根评论已到末尾，返回缓存中的部分数据: gifId={}, page={}, size={}", 
                                     gifId, page, comments.size());
                         } else {
@@ -699,9 +732,19 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                         }
                     } else {
                         // DB 有数据，直接使用（ZSet 会自动去重重复的评论）
-                        comments = rootCommentBOs.stream()
-                                .map(commentParamMapper::boToCommentVO)
-                                .toList();
+
+                        // 缓存commentIdsFromCache中可能有数据，先查询出来拼到comments中
+                        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
+                            comments = batchGetRootCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
+                            comments.addAll(rootCommentBOs.stream()
+                                    .map(commentParamMapper::boToCommentVO)
+                                    .toList());
+                        } else {
+                            // 缓存中没有数据
+                            comments = rootCommentBOs.stream()
+                                    .map(commentParamMapper::boToCommentVO)
+                                    .toList();
+                        }
                         
                         // 追加到 ZSet 缓存（顺序分页，逐步累积，自动去重）
                         appendToRootCommentZSet(gifId, rootCommentBOs);
@@ -723,6 +766,31 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         enrichRootComments(comments, userId);
         
         return comments;
+    }
+
+    /**
+     * 获取cursor
+     * @param cursor 游标
+     * @param commentIdsFromCache 缓存数据
+     * @return cursor
+     */
+    private LocalDateTime getCursor(LocalDateTime cursor, Map<String, Double> commentIdsFromCache) {
+        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
+            // LinkedHashMap 保持插入顺序，直接获取最后一个元素的 score（时间最新的）
+            Double lastScore = null;
+            for (Double score : commentIdsFromCache.values()) {
+                lastScore = score;  // 最后一次循环就是最后一个元素
+            }
+
+            if (lastScore != null) {
+                // 将 score（秒级时间戳）转换为 LocalDateTime
+                cursor = LocalDateTime.ofInstant(
+                        Instant.ofEpochSecond(lastScore.longValue()),
+                        ZoneId.systemDefault()
+                );
+            }
+        }
+        return cursor;
     }
 
     /**
@@ -760,9 +828,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         String zsetKey = COMMENT_CHILD_KEY + rootCommentId;
         
         // 先用 page 从 ZSet 按索引查询
-        Set<String> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
+        Map<String, Double> commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
         
-        List<CommentVO> comments = new ArrayList<>();
+        List<CommentVO> comments;
         
         // 优化：检查缓存数据是否足够
         // 如果缓存返回的数据量 < limit，说明 ZSet 数据不完整，需要查询数据库
@@ -770,7 +838,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty() && !cacheDataInsufficient) {
             // ZSet 缓存命中且数据充足
-            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache));
+            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
             log.info("子评论ZSet缓存完全命中: rootId={}, page={}, size={}", rootCommentId, page, comments.size());
         } else {
             // ZSet 未命中或数据不足，使用分布式锁从DB查询
@@ -780,8 +848,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             if (locked) {
                 try {
                     // 获得锁，用 cursor 从数据库查询
-                    // 注意：DB 查询可能返回与缓存重复的数据（因为 cursor 是上一页最后一条的 createdAt）
-                    // 但 ZSet 会自动去重（member 相同），所以直接追加即可，如果要从缓存的cursor处开始查询，还需要获取该cursor
+                    // 注意：如果缓存有数据，从缓存最后一条的时间开始查询（避免重复数据）
+                    cursor = getCursor(cursor, commentIdsFromCache);
+
                     List<ChildCommentBO> childCommentBOs = commentMapper.selectChildCommentsByCursor(
                             Long.parseLong(rootCommentId), cursor, limit
                     );
@@ -790,7 +859,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                         // DB 没有新数据，说明已到达末尾
                         // 但缓存可能有部分数据（最后一页不足 limit 条），需要返回
                         if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
-                            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache));
+                            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
                             log.info("子评论已到末尾，返回缓存中的部分数据: rootId={}, page={}, size={}", 
                                     rootCommentId, page, comments.size());
                         } else {
@@ -798,10 +867,20 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                         }
                     } else {
                         // DB 有数据，直接使用（ZSet 会自动去重重复的评论）
-                        comments = childCommentBOs.stream()
-                                .map(commentParamMapper::childBoToCommentVO)
-                                .toList();
-                        
+
+                        // 缓存commentIdsFromCache中可能有数据，先查询出来拼到comments中
+                        if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
+                            comments = batchGetChildCommentsByIds(new ArrayList<>(commentIdsFromCache.keySet()));
+                            comments.addAll(childCommentBOs.stream()
+                                    .map(commentParamMapper::childBoToCommentVO)
+                                    .toList());
+                        } else {
+                            // 缓存中没有数据
+                            comments = childCommentBOs.stream()
+                                    .map(commentParamMapper::childBoToCommentVO)
+                                    .toList();
+                        }
+
                         // 追加到 ZSet 缓存（顺序分页，逐步累积，自动去重）
                         appendToChildCommentZSet(rootCommentId, childCommentBOs);
                         
@@ -958,7 +1037,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             Function<List<String>, List<CommentVO>> batchGetter,
             Supplier<List<CommentVO>> fallbackQuery) {
         
-        Set<String> commentIdsFromCache;
+        Map<String, Double> commentIdsFromCache;
         
         // 重试多次，给获得锁的线程足够时间完成查询和写缓存
         for (int i = 0; i < CACHE_RETRY_TIMES; i++) {
@@ -967,7 +1046,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                 commentIdsFromCache = getCommentIdsFromZSetByPage(zsetKey, page, limit);
                 
                 if (commentIdsFromCache != null && !commentIdsFromCache.isEmpty()) {
-                    List<CommentVO> comments = batchGetter.apply(new ArrayList<>(commentIdsFromCache));
+                    List<CommentVO> comments = batchGetter.apply(new ArrayList<>(commentIdsFromCache.keySet()));
                     log.info("{}第{}次重试成功从ZSet获取: entityId={}, page={}, size={}", 
                             entityType, i + 1, entityId, page, comments.size());
                     return comments;

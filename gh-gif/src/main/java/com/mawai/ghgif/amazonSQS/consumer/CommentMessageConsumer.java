@@ -89,7 +89,7 @@ public class CommentMessageConsumer implements MessageConsumer {
                 Comment parentComment = commentService.getOne(queryWrapper);
                 
                 if (parentComment == null || parentComment.getStatus() != 1) {
-                    throw new RuntimeException("父评论不存在或已删除");
+                    throw new RuntimeException("父评论不存在或已删除，请重试");
                 }
 
                 comment.setParentId(parentIdLong);
@@ -149,9 +149,13 @@ public class CommentMessageConsumer implements MessageConsumer {
      */
     private Comment buildCommentFromMessage(CommentMessage commentMessage) {
         Comment comment = new Comment();
+        comment.setId(commentMessage.getCommentId());  // ✅ 使用预生成的ID
         comment.setUserId(commentMessage.getUserId());
         comment.setGifId(commentMessage.getGifId());
         comment.setContent(commentMessage.getContent());
+        if (StrUtil.isNotBlank(commentMessage.getParentId())) {
+            comment.setParentId(Long.valueOf(commentMessage.getParentId()));
+        }
         comment.setStatus((byte) 1); // 正常状态（未来可以加审核）
         comment.setLikeCount(0);
         return comment;

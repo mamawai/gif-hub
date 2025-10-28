@@ -17,6 +17,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -28,7 +29,7 @@ public class AmazonSQSService implements SmartLifecycle {
     private SqsClient sqsClient;
     private volatile boolean running = true; // 启动前若为true，则sqs关闭
     private final List<MessageConsumer> messageConsumers;
-    private List<CustomSQSMessageConsumer> sqsMessageConsumerList;
+    private List<CustomSQSMessageConsumer> sqsMessageConsumerList = new ArrayList<>();
     
     @Value("${aws.sqs.base-queue-url}")
     private String baseQueueUrl;

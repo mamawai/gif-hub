@@ -18,9 +18,9 @@ public interface CommentProcessService {
      * 
      * @param commentDTO 评论DTO
      * @param userId 当前用户ID
-     * @return 是否发表成功
+     * @return 包含预生成评论ID的CommentVO
      */
-    Boolean addComment(CommentDTO commentDTO, Long userId);
+    CommentVO addComment(CommentDTO commentDTO, Long userId);
     
     /**
      * 获取GIF根评论列表（游标+页码分页，带ZSet缓存）

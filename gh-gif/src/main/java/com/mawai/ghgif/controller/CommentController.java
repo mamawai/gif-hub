@@ -29,12 +29,12 @@ public class CommentController {
     /**
      * 发表评论
      */
-    @Operation(summary = "发表评论", description = "支持根评论和回复")
+    @Operation(summary = "发表评论", description = "支持根评论和回复，返回预生成的评论ID")
     @PostMapping("/add")
-    public ApiResponse<Boolean> addComment(@RequestBody @Valid CommentDTO commentDTO) {
+    public ApiResponse<CommentVO> addComment(@RequestBody @Valid CommentDTO commentDTO) {
         try {
             Long userId = StpUtil.getLoginIdAsLong();
-            boolean result = commentProcessService.addComment(commentDTO, userId);
+            CommentVO result = commentProcessService.addComment(commentDTO, userId);
             return ApiResponse.success(result);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(400, e.getMessage());

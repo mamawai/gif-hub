@@ -40,7 +40,7 @@
     </select>
     
     <!-- 批量统计根评论的子评论数量 -->
-    <select id="countChildCommentsBatch" resultType="map">
+    <select id="countChildCommentsBatch" resultType="com.mawai.ghmbplus.dto.ChildCountBO">
         SELECT 
             root_comment_id,
             COUNT(*) AS child_count
