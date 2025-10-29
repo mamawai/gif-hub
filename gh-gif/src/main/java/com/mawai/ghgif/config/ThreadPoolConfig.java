@@ -23,25 +23,33 @@ public class ThreadPoolConfig {
 
     /**
      * 定时任务专用线程池
+     *
+     * <p>配置说明：</p>
+     * <ul>
+     *   <li>核心线程数 6：对应 syncGifLikeCount() 中的 6 个并发任务</li>
+     *   <li>最大线程数 12：允许 2 轮任务同时执行（应对任务延迟）</li>
+     *   <li>队列容量 6：只允许 1 轮任务排队，避免无限堆积</li>
+     *   <li>拒绝策略 CallerRunsPolicy：超过容量时由调度线程执行，起到背压作用</li>
+     * </ul>
      */
     @Bean("scheduledExecutor")
     public Executor scheduledExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数
-        executor.setCorePoolSize(10);
-        // 最大线程数
-        executor.setMaxPoolSize(20);
-        // 队列容量
-        executor.setQueueCapacity(200);
+        // 核心线程数：6（对应6个并发任务）
+        executor.setCorePoolSize(6);
+        // 最大线程数：12（允许2轮任务同时执行）
+        executor.setMaxPoolSize(12);
+        // 队列容量：6（只允许1轮任务排队）
+        executor.setQueueCapacity(6);
         // 线程名前缀
         executor.setThreadNamePrefix("scheduled-");
         // 线程空闲时间
         executor.setKeepAliveSeconds(60);
-        // 拒绝策略：由调用线程处理
+        // 拒绝策略：由调用线程处理（如果真的堆积，让调度线程自己执行）
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         // 等待所有任务结束后再关闭线程池
         executor.setWaitForTasksToCompleteOnShutdown(true);
-        // 等待时间（默认为0，此时立即停止）
+        // 等待时间
         executor.setAwaitTerminationSeconds(60);
         // 初始化
         executor.initialize();

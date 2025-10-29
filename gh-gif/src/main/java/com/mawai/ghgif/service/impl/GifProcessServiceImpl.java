@@ -83,7 +83,10 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
     
     /**
-     * 系统启动时初始化GIF总数到Redis
+     * 系统启动时初始化 GIF 总数到 Redis
+     *
+     * <p>从数据库查询状态为 1（正常）的 GIF 总数，并缓存到 Redis 中，
+     * 不设置过期时间（永久有效）。如果初始化失败，设置默认值 0。</p>
      */
     private void initTotalGifCount() {
         try {
@@ -103,8 +106,11 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
     
     /**
-     * 获取GIF总数（从Redis缓存）
-     * @return GIF总数
+     * 获取 GIF 总数（从 Redis 缓存）
+     *
+     * <p>优先从 Redis 缓存读取，如果缓存不存在或读取失败，则查询数据库兜底。</p>
+     *
+     * @return GIF 总数，失败时返回 0
      */
     @Override
     public Long getTotalGifCount() {
@@ -127,8 +133,11 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * @param userId 用户ID
-     * 减少GIF总数（-1）
+     * 减少 GIF 总数（-1）
+     *
+     * <p>同时减少全局 GIF 总数和用户维度的 GIF 总数缓存。</p>
+     *
+     * @param userId 用户 ID
      */
     private void decrementTotalGifCount(Long userId) {
         try {
@@ -154,11 +163,27 @@ public class GifProcessServiceImpl implements GifProcessService {
     private String SQS_QUEUE_URL;
 
     /**
-     * 上传单个GIF文件
-     * @param gifDTO GIF请求
+     * 上传单个 GIF 文件到 R2 对象存储
      *
-     * @return 文件访问URL
-     * @throws FileUploadException 文件上传异常
+     * <p>上传文件到 Cloudflare R2，并将元数据发送到 SQS 队列异步处理。
+     * 采用分层目录结构存储文件，避免单目录文件过多。</p>
+     *
+     * <p><b>文件路径格式：</b>{@code gifs/{userId前2位}/{userId}/{uuid}.gif}</p>
+     * <p><b>限流策略：</b>每分钟最多 5 次上传</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>上传文件到 R2 存储</li>
+     *   <li>封装 GIF 元数据为 {@link GifMessage}</li>
+     *   <li>发送消息到 SQS 队列</li>
+     *   <li>消费者异步保存到数据库</li>
+     * </ol>
+     *
+     * <p><b>异常处理：</b>如果 SQS 发送失败，会删除已上传的 R2 文件</p>
+     *
+     * @param gifDTO GIF 上传请求对象
+     * @return 文件访问 URL
+     * @throws FileUploadException 文件上传失败时抛出
      */
     @Override
     @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试", type = RateLimiterType.UPLOAD)
@@ -227,10 +252,16 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 批量上传GIF文件
-     * @param gifsDTO 文件对象列表
+     * 批量上传 GIF 文件
      *
-     * @return 文件访问URL列表，失败的位置为空字符串
+     * <p>使用虚拟线程并发上传多个文件，提高上传效率。
+     * 每个文件独立处理，失败不影响其他文件。</p>
+     *
+     * <p><b>并发策略：</b>使用 {@code fileUploadExecutor} 虚拟线程池并发上传</p>
+     * <p><b>限流策略：</b>每个文件独立限流（通过 AOP 代理调用 {@link #r2uploadGif}）</p>
+     *
+     * @param gifsDTO 文件对象列表
+     * @return 文件访问 URL 列表，失败的位置为空字符串
      */
     @Override
     public List<String> r2batchUploadGif(List<GifDTO> gifsDTO) {
@@ -281,8 +312,11 @@ public class GifProcessServiceImpl implements GifProcessService {
     
 
     /**
-     * 更新下载次数
-     * @param fileId 文件Id
+     * 更新 GIF 下载次数
+     *
+     * <p>增量更新 Redis 计数器，定时任务会批量同步到数据库。</p>
+     *
+     * @param fileId 文件 ID
      * @return 是否更新成功
      */
     @Override
@@ -293,11 +327,28 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 更新点赞次数 - 使用redis实现
-     * @param fileId 文件ID
-     * @param userLikeCategoryId 用户点赞分类ID
-     * @param userId 用户ID
-     * @param isLike 点赞还是取消点赞
+     * 切换 GIF 点赞状态
+     *
+     * <p>使用 Redis 实现点赞/取消点赞功能，支持用户分类管理。</p>
+     *
+     * <p><b>点赞操作：</b></p>
+     * <ul>
+     *   <li>从 dislike set 中删除（如果存在）</li>
+     *   <li>添加到 like hash 中，记录分类 ID</li>
+     *   <li>增加点赞计数</li>
+     * </ul>
+     *
+     * <p><b>取消点赞操作：</b></p>
+     * <ul>
+     *   <li>从 like hash 中删除（如果存在）</li>
+     *   <li>添加到 dislike set 中</li>
+     *   <li>减少点赞计数</li>
+     * </ul>
+     *
+     * @param fileId 文件 ID
+     * @param userLikeCategoryId 用户点赞分类 ID（点赞时必填）
+     * @param userId 用户 ID
+     * @param isLike true-点赞，false-取消点赞
      * @return 是否更新成功
      */
     @Override
@@ -335,13 +386,24 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
 
     /**
-     * 删除GIF文件 -- 数据库层面删除
-     * 1.先查询文件是否存在
-     * 2.如果存在，则先保存删除的文件到删除表中 -- 删除表监听删除事件（定时轮询也可能会浪费请求一次的资源，比如每小时轮询一次但是只有一个删除图片）
-     * 3.如果删除成功，则减少GIF总数
-     * 这样做是为了减少删除文件的次数，减少R2的请求次数，
+     * 删除 GIF 文件（软删除 + 批量物理删除）
      *
-     * @param fileId 文件ID
+     * <p>采用软删除策略，先从数据库删除记录，将文件信息保存到删除表，
+     * 达到阈值后触发事件批量删除 R2 存储上的文件。</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>查询 GIF 是否存在</li>
+     *   <li>保存删除记录到 gif_delete 表</li>
+     *   <li>从 gif 表删除记录</li>
+     *   <li>减少 GIF 总数缓存</li>
+     *   <li>删除计数达到阈值时，发布 {@link GifDeleteEvent} 事件</li>
+     *   <li>事件监听器批量删除 R2 文件</li>
+     * </ol>
+     *
+     * <p><b>设计理念：</b>批量删除减少 R2 API 调用次数，降低成本</p>
+     *
+     * @param fileId 文件 ID
      * @return 是否删除成功
      */
     @Override
@@ -394,11 +456,16 @@ public class GifProcessServiceImpl implements GifProcessService {
     }
     
     /**
-     * 获取用户上传的GIF文件列表
-     * @param userId 用户ID
+     * 分页获取用户上传的 GIF 列表
+     *
+     * <p>查询用户上传的所有 GIF，并合并 Redis 中的实时统计数据（点赞、下载、查看次数）。</p>
+     *
+     * <p><b>性能优化：</b>使用 Redis 缓存用户 GIF 总数，避免每次分页都 count</p>
+     *
+     * @param userId 用户 ID
      * @param page 页码
      * @param pageSize 每页数量
-     * @return GIF文件URL列表
+     * @return GIF 列表和总数
      */
     @Override
     public Pair<List<GifVO>, Long> listGifsByUser(Long userId, Integer page, Integer pageSize) {

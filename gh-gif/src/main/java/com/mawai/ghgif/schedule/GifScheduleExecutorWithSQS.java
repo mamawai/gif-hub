@@ -31,7 +31,6 @@ import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
-import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -81,28 +80,31 @@ public class GifScheduleExecutorWithSQS {
     private Integer SCAN_COUNT;
 
     /**
-     * 定时任务：将Redis中GIF点赞次数和用户喜欢的GIF同步到数据库
-     * 
-     * <p>该方法按照固定时间间隔（{@link #SYNC_INTERVAL}分钟）执行，
-     * 将Redis缓存中的点赞数据持久化到数据库中。主要包含两部分：</p>
-     * 
+     * 定时同步 Redis 增量数据到 MySQL
+     *
+     * <p>每分钟执行一次，将 Redis 中累积的增量统计数据批量同步到数据库。
+     * 采用 CompletableFuture 并发执行 6 个同步任务，互不阻塞。</p>
+     *
+     * <p><b>同步任务列表：</b></p>
      * <ul>
-     *   <li>同步GIF下载次数到数据库（{@link #syncDownloadCountToDatabase()}）</li>
-     *   <li>同步GIF查看次数到数据库（{@link #syncViewCountsToDatabase()}）</li>
-     *   <li>同步GIF点赞计数到数据库（{@link #syncLikeCountsToDatabase()}）</li>
-     *   <li>同步用户喜欢记录到数据库（{@link #syncUserLikesToDatabaseConcurrent()}）</li>
-     *   <li>同步评论点赞计数到数据库（{@link #syncCommentLikeCountsToDatabase()}）</li>
-     *   <li>同步用户评论点赞记录到数据库（{@link #syncUserCommentLikesToDatabase()}）</li>
+     *   <li>GIF 下载次数 - 直接更新数据库</li>
+     *   <li>GIF 查看次数 - 直接更新数据库</li>
+     *   <li>GIF 点赞次数 - 直接更新数据库</li>
+     *   <li>用户点赞记录 - 发送到 SQS 异步处理</li>
+     *   <li>评论点赞次数 - 直接更新数据库</li>
+     *   <li>用户评论点赞记录 - 发送到 SQS 异步处理</li>
      * </ul>
-     * 
-     * @see #syncDownloadCountToDatabase() 下载数据同步实现
-     * @see #syncViewCountsToDatabase() 查看数据同步实现
-     * @see #syncLikeCountsToDatabase() 点赞数据同步实现
-     * @see #syncUserLikesToDatabaseConcurrent() 用户喜欢记录同步实现
-     * @see #syncCommentLikeCountsToDatabase() 评论点赞数据同步实现
-     * @see CacheService#scanKeys(String, int) 获取符合模式的Redis键
+     *
+     * <p><b>设计理念：</b>高频操作写 Redis（快），定时批量同步到 MySQL（减压）</p>
+     *
+     * @see #syncDownloadCountToDatabase()
+     * @see #syncViewCountsToDatabase()
+     * @see #syncLikeCountsToDatabase()
+     * @see #syncUserLikesToDatabaseConcurrent()
+     * @see #syncCommentLikeCountsToDatabase()
+     * @see #syncUserCommentLikesToDatabase()
      */
-    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 转换为毫秒
+    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000)
     public void syncGifLikeCount() {
         log.info("开始同步方法...");
         // 使用CompletableFuture并发执行，不等待完成
@@ -152,8 +154,18 @@ public class GifScheduleExecutorWithSQS {
         log.info("已启动GIF数据同步任务，将在{}分钟后再次触发同步", SYNC_INTERVAL);
     }
 
-    /**     
-     * 同步下载次数到数据库
+    /**
+     * 同步 GIF 下载次数到数据库
+     *
+     * <p>从 Redis 扫描所有下载计数键，提取非零值后批量更新数据库，并原子性重置 Redis 计数。</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>扫描 Redis 键：{@code gif:download:*}</li>
+     *   <li>过滤非零值并获取计数</li>
+     *   <li>原子性重置 Redis 计数为 0</li>
+     *   <li>批量更新数据库：{@code UPDATE gif SET download_count = download_count + ?}</li>
+     * </ol>
      */
     private void syncDownloadCountToDatabase() {
         try {
@@ -206,7 +218,17 @@ public class GifScheduleExecutorWithSQS {
 
 
     /**
-     * 同步查看次数到数据库
+     * 同步 GIF 查看次数到数据库
+     *
+     * <p>从 Redis 扫描所有查看计数键，提取非零值后批量更新数据库，并原子性重置 Redis 计数。</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>扫描 Redis 键：{@code gif:view:*}</li>
+     *   <li>过滤非零值并获取计数</li>
+     *   <li>原子性重置 Redis 计数为 0</li>
+     *   <li>批量更新数据库：{@code UPDATE gif SET view_count = view_count + ?}</li>
+     * </ol>
      */
     private void syncViewCountsToDatabase() {
         try {
@@ -257,19 +279,20 @@ public class GifScheduleExecutorWithSQS {
     }
 
     /**
-     * 同步点赞数据到数据库
+     * 同步 GIF 点赞次数到数据库
      *
-     * <p>从Redis获取所有需要同步的GIF点赞计数数据，并将其增量更新到数据库中。
-     * 处理流程包括：</p>
-     * 
+     * <p>从 Redis 扫描所有点赞计数键，提取非零值后批量更新数据库，并原子性重置 Redis 计数。</p>
+     *
+     * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>扫描匹配的key + 过滤非零值 + 获取值 + 重置为0</li>
-     *   <li>提取每个键中的GIF ID</li>
-     *   <li>获取点赞计数并原子性地重置Redis计数</li>
-     *   <li>批量更新数据库</li>
+     *   <li>扫描 Redis 键：{@code gif:like:*}</li>
+     *   <li>过滤非零值并获取计数</li>
+     *   <li>原子性重置 Redis 计数为 0</li>
+     *   <li>批量更新数据库：{@code UPDATE gif SET like_count = like_count + ?}</li>
      * </ol>
      *
-     * 由于重置为0到db更新这段时间查询的结果会不一致，所以先把db更新放在这里先不用SQS
+     * <p><b>注意：</b>由于重置为 0 到 DB 更新这段时间查询结果会不一致，
+     * 所以直接在定时任务中更新数据库，不使用 SQS 异步处理。</p>
      */
     private void syncLikeCountsToDatabase() {
         try {
@@ -322,31 +345,25 @@ public class GifScheduleExecutorWithSQS {
     }
     
     /**
-     * 同步用户喜欢记录到数据库 - 异步SQS版本（生产者角色）
-     * 
-     * <p>该方法已重构为使用Amazon SQS进行消息队列解耦，实现异步处理用户的喜欢/不喜欢数据同步。
-     * 作为生产者角色，负责获取Redis中的用户行为数据并发送到SQS队列，由消费者异步处理数据库同步操作。</p>
-     * 
-     * <h3>处理流程：</h3>
+     * 同步用户点赞记录到数据库（SQS 异步版本 - 生产者）
+     *
+     * <p>从 Redis 获取所有有点赞/取消点赞数据的用户 ID，
+     * 使用虚拟线程并发获取每个用户的数据，封装为消息发送到 SQS 队列，
+     * 由 {@link UserLikesConsumer} 异步消费并同步到数据库。</p>
+     *
+     * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>调用 {@code cacheService.getUserIdsWithLikeDataOptimized()} 获取Redis中有数据的用户ID</li>
-     *   <li>如果无数据则直接返回，记录日志</li>
-     *   <li>遍历userIds {@code fetchSingleUserData(userId)}</li>
-     *   <li>将数据封装为 {@code UserLikesMessage} 发送到SQS队列</li>
-     *   <li>由 {@code UserLikesConsumer} 异步消费并同步到数据库</li>
+     *   <li>扫描 Redis 获取有数据的用户 ID 列表</li>
+     *   <li>使用虚拟线程并发获取每个用户的点赞数据</li>
+     *   <li>封装为 {@link UserLikesMessage} 发送到 SQS</li>
+     *   <li>消费者异步处理数据库同步（新增/删除点赞记录）</li>
      * </ol>
-     * 
-     * <h3>相关：</h3>
-     * <ul>
-     *   <li>{@code UserLikesConsumer} - SQS消息消费者，处理数据库同步</li>
-     *   <li>{@code UserLikesMessage} - 用户喜欢数据的消息封装类</li>
-     *   <li>{@code AmazonSQSService} - SQS服务封装，负责消息发送</li>
-     *   <li>{@code CacheService} - Redis缓存服务，提供用户行为数据</li>
-     * </ul>
-     * 
-     * @since 2.0.0 - SQS异步重构版本
-     * @see UserLikesConsumer#handleMessage()
+     *
+     * <p><b>为什么使用 SQS：</b>解耦数据获取和数据库写入，避免阻塞定时任务</p>
+     *
+     * @see UserLikesConsumer
      * @see UserLikesMessage
+     * @see #fetchSingleUserData(String)
      */
     private void syncUserLikesToDatabaseConcurrent() {
         try {
@@ -389,7 +406,15 @@ public class GifScheduleExecutorWithSQS {
     }
 
     /**
-     * 清理Tag表中使用次数为0的Tag数据  每小时执行一次
+     * 更新热门标签缓存并清理无用标签
+     *
+     * <p>每小时执行一次，完成两个任务：</p>
+     * <ol>
+     *   <li>从数据库查询热门标签，更新 Redis 缓存</li>
+     *   <li>删除使用次数为 0 的标签（每次最多 200 条，避免大量回表）</li>
+     * </ol>
+     *
+     * <p><b>注意：</b>删除 GIF 时会删除 gif_tag 关联，这里只删除 tag 表记录</p>
      */
     @Scheduled(fixedRate = 60 * 1000 * 60)
     public void replaceHotTagsAndClearZeroTag() {
@@ -411,20 +436,24 @@ public class GifScheduleExecutorWithSQS {
         }
     }
 
-     /**
-     * 监听GifDeleteEvent事件，清理删除记录表中的数据 -- 删除R2层面的垃圾文件
-     * 不加try-catch，避免异常回滚失败
+    /**
+     * 清理已删除的 GIF 文件（事件监听）
      *
-     * <p>该方法清理已被标记为删除的GIF文件，流程如下：</p>
+     * <p>监听 {@link GifDeleteEvent} 事件，批量删除 R2 存储上的垃圾文件，
+     * 并清理数据库中的删除记录。</p>
      *
+     * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>监听GifDeleteEvent事件</li>
-     *   <li>从删除记录表中获取需要删除的记录</li>
-     *   <li>批量删除对应的R2存储上的实际文件</li>
-     *   <li>R2文件删除成功后，再从数据库中删除这些记录</li>
+     *   <li>从 gif_delete 表获取待删除记录</li>
+     *   <li>批量删除 R2 存储上的文件（使用 S3 批量删除 API）</li>
+     *   <li>更新 tag 表的使用次数，删除 gif_tag 关联</li>
+     *   <li>删除成功的记录从 gif_delete 表移除</li>
+     *   <li>删除失败的记录保存到 gif_delete_failed 表，等待人工处理</li>
      * </ol>
      *
-     * <p>该任务确保系统垃圾文件得到定期清理，释放存储空间</p>
+     * <p><b>注意：</b>不加 try-catch，让事务回滚机制生效</p>
+     *
+     * @param event GIF 删除事件，包含删除数量和批次大小
      */
     @Transactional(rollbackFor = Exception.class)
     @EventListener
@@ -550,11 +579,21 @@ public class GifScheduleExecutorWithSQS {
     }
     
     /**
-     * 从URL中提取S3对象键
-     * 例如从 <a href="">https://mynnmy.top/gifs/01/123/abc.gif</a> 提取 "gifs/01/123/abc.gif"
+     * 从 URL 中提取 S3 对象键
      *
-     * @param url 文件URL
-     * @return 对象键
+     * <p>从完整的 CDN URL 中提取对象存储的键名。</p>
+     *
+     * <p><b>示例：</b></p>
+     * <pre>
+     * 输入：<a href="">https://mynnmy.top/gifs/01/123/abc.gif</a>
+     * 输出：gifs/01/123/abc.gif
+     * </pre>
+     *
+     * <p><b>性能优化：</b>使用固定长度截取（19 字符），
+     * 比 split 方式快 10 倍（10000 次：0.5ms vs 6ms）</p>
+     *
+     * @param url 文件 URL
+     * @return S3 对象键，如果 URL 为空则返回 null
      */
     private String extractObjectKeyFromUrl(String url) {
         if (url == null || url.isEmpty()) {
@@ -576,7 +615,19 @@ public class GifScheduleExecutorWithSQS {
     }
 
     /**
-     * 获取单个用户的数据（纯IO操作，适合虚拟线程）
+     * 获取单个用户的点赞数据
+     *
+     * <p>从 Redis 获取用户的点赞和取消点赞记录，并自动清理 Redis 数据。
+     * 纯 IO 操作，适合虚拟线程执行。</p>
+     *
+     * <p><b>数据来源：</b></p>
+     * <ul>
+     *   <li>{@code user:like:category:{userId}} - Hash 结构，存储点赞的 GIF 和分类</li>
+     *   <li>{@code user:dislike:{userId}} - Set 结构，存储取消点赞的 GIF</li>
+     * </ul>
+     *
+     * @param userId 用户 ID
+     * @return 用户点赞数据对象，如果没有数据则返回 null
      */
     private UserLikeData fetchSingleUserData(String userId) {
         try {
@@ -633,14 +684,19 @@ public class GifScheduleExecutorWithSQS {
 
     /**
      * 定时清理软删除的评论（物理删除）
-     * 
-     * <p>每天凌晨3点执行，清理策略：</p>
-     * <ul>
-     *   <li>从 comment_pending_delete 表获取待删除评论ID</li>
-     *   <li>根据主键批量物理删除</li>
-     * </ul>
+     *
+     * <p>每天凌晨 3 点执行，从待删除表批量物理删除评论记录。</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>从 comment_pending_delete 表查询待删除评论 ID</li>
+     *   <li>批量物理删除 comment 表中的记录</li>
+     *   <li>删除 comment_pending_delete 表中的对应记录</li>
+     * </ol>
+     *
+     * <p><b>设计理念：</b>软删除 + 定时物理删除，避免误删且保持数据库整洁</p>
      */
-    @Scheduled(cron = "0 0 3 * * ?") // 每天凌晨3点执行
+    @Scheduled(cron = "0 0 3 * * ?")
     public void cleanupDeletedComments() {
         try {
             int batchSize = 1000;
@@ -658,8 +714,10 @@ public class GifScheduleExecutorWithSQS {
     /**
      * 从待删除表批量删除评论
      *
+     * <p>循环处理待删除表中的记录，每次处理一批，直到表为空。</p>
+     *
      * @param batchSize 每批处理数量
-     * @return 删除的评论数量
+     * @return 总共删除的评论数量
      */
     private int deleteCommentsFromPendingTable(int batchSize) {
         int totalDeleted = 0;
@@ -714,15 +772,16 @@ public class GifScheduleExecutorWithSQS {
     }
     
     /**
-     * 同步评论点赞数据到数据库
+     * 同步评论点赞次数到数据库
      *
-     * <p>从Redis获取所有需要同步的评论点赞计数数据，并将其增量更新到数据库中。
-     * 处理流程与GIF点赞同步类似：</p>
-     * 
+     * <p>从 Redis 扫描所有评论点赞计数键，提取非零值后批量更新数据库，并原子性重置 Redis 计数。</p>
+     *
+     * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>扫描匹配的key + 过滤非零值 + 获取值 + 重置为0</li>
-     *   <li>提取每个键中的评论 ID</li>
-     *   <li>批量更新数据库</li>
+     *   <li>扫描 Redis 键：{@code comment:like:*}</li>
+     *   <li>过滤非零值并获取计数</li>
+     *   <li>原子性重置 Redis 计数为 0</li>
+     *   <li>批量更新数据库：{@code UPDATE comment SET like_count = like_count + ?}</li>
      * </ol>
      */
     private void syncCommentLikeCountsToDatabase() {
@@ -776,29 +835,23 @@ public class GifScheduleExecutorWithSQS {
     }
 
     /**
-     * 同步用户评论点赞记录到数据库 - 异步SQS版本（生产者角色）
-     * 
-     * <p>该方法作为生产者，负责获取Redis中的用户评论点赞数据并发送到SQS队列。
-     * 采用原子rename操作确保数据安全，避免处理期间的数据丢失。</p>
-     * 
-     * <h3>处理流程：</h3>
+     * 同步用户评论点赞记录到数据库（SQS 异步版本 - 生产者）
+     *
+     * <p>从 Redis 获取所有有评论点赞/取消点赞数据的用户 ID，
+     * 使用虚拟线程并发获取每个用户的数据，封装为消息发送到 SQS 队列，
+     * 由 {@link CommentLikesConsumer} 异步消费并同步到数据库。</p>
+     *
+     * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>扫描所有 user:comment:like:{userId} 键</li>
-     *   <li>并发处理每个用户，调用 {@code fetchSingleUserCommentData} 获取数据</li>
-     *   <li>将数据封装为 {@code CommentLikesMessage} 发送到SQS队列</li>
-     *   <li>由 {@code CommentLikesConsumer} 异步消费并同步到数据库</li>
+     *   <li>扫描 Redis 获取有数据的用户 ID 列表</li>
+     *   <li>使用虚拟线程并发获取每个用户的评论点赞数据</li>
+     *   <li>封装为 {@link CommentLikesMessage} 发送到 SQS</li>
+     *   <li>消费者异步处理数据库同步（新增/删除评论点赞记录）</li>
      * </ol>
-     * 
-     * <h3>数据安全保证：</h3>
-     * 使用原子rename操作而非get-delete，确保：
-     * <ul>
-     *   <li>处理期间的新数据不会丢失（写入原始key）</li>
-     *   <li>SQS发送失败时数据仍在processingKey中</li>
-     *   <li>避免并发处理的竞态条件</li>
-     * </ul>
-     * 
-     * @since 2025-10-17 - SQS异步重构版本
-     * @see CommentLikesConsumer#handle(Message) 
+     *
+     * <p><b>为什么使用 SQS：</b>解耦数据获取和数据库写入，避免阻塞定时任务</p>
+     *
+     * @see CommentLikesConsumer
      * @see CommentLikesMessage
      * @see #fetchSingleUserCommentData(String)
      */
@@ -849,17 +902,19 @@ public class GifScheduleExecutorWithSQS {
     }
     
     /**
-     * 获取单个用户的评论点赞数据（纯IO操作，适合虚拟线程）
-     * 
-     * <p>完全复用GIF的逻辑，处理like set和dislike set：</p>
+     * 获取单个用户的评论点赞数据
+     *
+     * <p>从 Redis 获取用户的评论点赞和取消点赞记录，并自动清理 Redis 数据。
+     * 纯 IO 操作，适合虚拟线程执行。</p>
+     *
+     * <p><b>数据来源：</b></p>
      * <ul>
-     *   <li>获取并删除like set中的数据（新增点赞）</li>
-     *   <li>获取并删除dislike set中的数据（取消点赞）</li>
-     *   <li>使用getStringSetSafely方法，自动清理Redis中的数据</li>
+     *   <li>{@code user:comment:like:{userId}} - Set 结构，存储点赞的评论 ID</li>
+     *   <li>{@code user:comment:dislike:{userId}} - Set 结构，存储取消点赞的评论 ID</li>
      * </ul>
-     * 
-     * @param userId 用户ID
-     * @return 评论点赞消息对象，如果没有数据则返回null
+     *
+     * @param userId 用户 ID
+     * @return 评论点赞消息对象，如果没有数据则返回 null
      */
     private CommentLikesMessage fetchSingleUserCommentData(String userId) {
         try {
