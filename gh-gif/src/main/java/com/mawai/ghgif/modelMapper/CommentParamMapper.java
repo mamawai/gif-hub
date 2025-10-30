@@ -2,6 +2,7 @@ package com.mawai.ghgif.modelMapper;
 
 import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dto.ChildCommentBO;
+import com.mawai.ghmbplus.dto.CommentDetailCacheBO;
 import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import org.mapstruct.Mapper;
@@ -57,5 +58,21 @@ public interface CommentParamMapper {
      * CommentLikeBO列表转CommentVO列表
      */
     List<CommentVO> likeBoListToCommentVOList(List<CommentLikeBO> commentLikeBOs);
+    
+    /**
+     * CommentDetailCacheBO转CommentVO（从 Redis Hash 缓存读取后的转换）
+     * 
+     * <p>统一处理根评论和子评论，根据 parentId 和 rootCommentId 是否为 null 自动区分</p>
+     * 
+     * @param cacheBO 缓存BO（从 Redis Hash 解析得到）
+     * @return CommentVO
+     */
+    @Mapping(target = "id", expression = "java(cacheBO.getId() != null ? cacheBO.getId().toString() : null)")
+    @Mapping(target = "parentId", expression = "java(cacheBO.getParentId() != null ? cacheBO.getParentId().toString() : \"\")")
+    @Mapping(target = "rootCommentId", expression = "java(cacheBO.getRootCommentId() != null ? cacheBO.getRootCommentId().toString() : \"\")")
+    @Mapping(target = "childCount", ignore = true)  // 在Service层设置
+    @Mapping(target = "children", ignore = true)    // 在Service层设置
+    @Mapping(target = "isLiked", ignore = true)     // 在Service层设置
+    CommentVO cacheBoToCommentVO(CommentDetailCacheBO cacheBO);
 }
 

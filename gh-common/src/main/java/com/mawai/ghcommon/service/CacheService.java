@@ -146,11 +146,11 @@ public class CacheService {
     }
 
     /**
-     * 删除键
+     * 删除键（异步非阻塞）
      * @param key 键
      */
     public boolean delete(String key) {
-        return Boolean.TRUE.equals(redisTemplate.delete(key));
+        return Boolean.TRUE.equals(redisTemplate.unlink(key));
     }
 
     /**
@@ -305,7 +305,7 @@ public class CacheService {
     private Map<String, Long> getLikeCategoryIds(String categoryKey, boolean clearAfterGet) {
         try {
             Map<Object, Object> rawMap = redisTemplate.opsForHash().entries(categoryKey);
-            if (clearAfterGet) redisTemplate.delete(categoryKey);
+            if (clearAfterGet) redisTemplate.unlink(categoryKey);
             
             // 转换类型
             Map<String, Long> result = new HashMap<>();
@@ -535,7 +535,7 @@ public class CacheService {
             }
             
             Set<String> result = getStringSet(key);
-            if (clearAfterGet) delete(key);
+            if (clearAfterGet) delete(key);  // 调用上面的 delete() 方法，已改为 unlink
             
             return result;
         } catch (Exception e) {
@@ -740,7 +740,7 @@ public class CacheService {
     public void replaceHotTags(String[] args, String key) {
         String script =
                 "local key = KEYS[1]; " +
-                "redis.call('DEL', key); " +
+                "redis.call('UNLINK', key); " +
                 "for i = 1, #ARGV, 2 do " +
                 "local score = tonumber(ARGV[i]); " +
                 "local member = ARGV[i + 1]; " +
@@ -794,7 +794,7 @@ public class CacheService {
     }
 
     /**
-     * 删除匹配pattern的所有key（使用SCAN避免阻塞）
+     * 删除匹配pattern的所有key（使用SCAN避免阻塞，UNLINK异步删除）
      * @param pattern 匹配模式
      * @return 删除的key数量
      */
@@ -804,7 +804,7 @@ public class CacheService {
             if (keys.isEmpty()) {
                 return 0;
             }
-            Long deleted = stringRedisTemplate.delete(keys);
+            Long deleted = stringRedisTemplate.unlink(keys);
             log.info("删除匹配pattern的key: pattern={}, count={}", pattern, deleted);
             return deleted != null ? deleted : 0;
         } catch (Exception e) {
@@ -912,6 +912,136 @@ public class CacheService {
             log.error("ZSet批量添加失败: key={}, size={}, error={}", 
                      key, scoreMembers.size(), e.getMessage(), e);
             return 0L;
+        }
+    }
+    
+    // ==================== Hash 操作方法 ====================
+    
+    /**
+     * Hash 批量设置字段（使用 ziplist 优化内存）
+     * 
+     * @param key Hash 的 key
+     * @param hash field-value 映射
+     * @param timeout 过期时间
+     * @param unit 时间单位
+     */
+    public void hashSetAll(String key, Map<String, String> hash, long timeout, TimeUnit unit) {
+        try {
+            stringRedisTemplate.opsForHash().putAll(key, hash);
+            stringRedisTemplate.expire(key, timeout, unit);
+        } catch (Exception e) {
+            log.error("Hash批量设置失败: key={}, size={}, error={}", 
+                     key, hash.size(), e.getMessage(), e);
+            throw new RuntimeException("Hash批量设置失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Hash 获取所有字段
+     * 
+     * @param key Hash 的 key
+     * @return field-value 映射，如果 key 不存在则返回空 Map
+     */
+    public Map<String, String> hashGetAll(String key) {
+        try {
+            Map<Object, Object> rawMap = stringRedisTemplate.opsForHash().entries(key);
+            
+            // 转换类型（Redis 返回的是 Object 类型）
+            Map<String, String> result = new HashMap<>();
+            for (Map.Entry<Object, Object> entry : rawMap.entrySet()) {
+                result.put(entry.getKey().toString(), entry.getValue().toString());
+            }
+            
+            return result;
+        } catch (Exception e) {
+            log.error("Hash获取所有字段失败: key={}, error={}", key, e.getMessage(), e);
+            return new HashMap<>();
+        }
+    }
+    
+    /**
+     * Hash 原子递增字段值（适用于计数器场景）
+     * 
+     * <p>使用 HINCRBY 命令，原子性操作，无需先读再写</p>
+     * 
+     * @param key Hash 的 key
+     * @param field 字段名
+     * @param delta 增量（可以为负数）
+     * @return 递增后的值
+     */
+    public Long hashIncrement(String key, String field, long delta) {
+        try {
+            return stringRedisTemplate.opsForHash().increment(key, field, delta);
+        } catch (Exception e) {
+            log.error("Hash递增字段失败: key={}, field={}, delta={}, error={}", 
+                     key, field, delta, e.getMessage(), e);
+            throw new RuntimeException("Hash递增字段失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Hash 原子递增字段值并设置过期时间（Lua 脚本保证原子性）
+     *
+     * @param key     Hash 的 key
+     * @param field   字段名
+     * @param delta   增量
+     * @param timeout 过期时间
+     * @param unit    时间单位
+     */
+    public void hashIncrementWithExpire(String key, String field, long delta, long timeout, TimeUnit unit) {
+        String script = 
+            "redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2]); " +
+            "redis.call('EXPIRE', KEYS[1], ARGV[3]);";
+        
+        try {
+            stringRedisTemplate.execute(
+                    RedisScript.of(script, Void.class),
+                    List.of(key),
+                    field,
+                    String.valueOf(delta),
+                    String.valueOf(unit.toSeconds(timeout))
+            );
+        } catch (Exception e) {
+            log.error("Hash递增字段并设置过期时间失败: key={}, field={}, error={}", 
+                     key, field, e.getMessage(), e);
+            throw new RuntimeException("Hash递增字段失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Hash 批量删除（根据 key 列表，使用 UNLINK 异步删除）
+     * 
+     * @param keys Hash key 列表
+     * @return 删除成功的数量
+     */
+    public int hashBatchDelete(List<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+        
+        try {
+            Long deleted = stringRedisTemplate.unlink(keys);
+            return deleted.intValue();
+        } catch (Exception e) {
+            log.error("Hash批量删除失败: size={}, error={}", keys.size(), e.getMessage(), e);
+            return 0;
+        }
+    }
+    
+    /**
+     * Hash 判断字段是否存在
+     * 
+     * @param key Hash 的 key
+     * @param field 字段名
+     * @return 是否存在
+     */
+    public boolean hashHasField(String key, String field) {
+        try {
+            return Boolean.TRUE.equals(stringRedisTemplate.opsForHash().hasKey(key, field));
+        } catch (Exception e) {
+            log.error("Hash判断字段存在失败: key={}, field={}, error={}", 
+                     key, field, e.getMessage(), e);
+            return false;
         }
     }
 }

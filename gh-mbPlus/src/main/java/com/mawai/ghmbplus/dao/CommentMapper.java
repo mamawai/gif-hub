@@ -2,6 +2,7 @@ package com.mawai.ghmbplus.dao;
 
 import com.mawai.ghmbplus.dto.ChildCommentBO;
 import com.mawai.ghmbplus.dto.ChildCountBO;
+import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import com.mawai.ghmbplus.model.Comment;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -94,4 +95,11 @@ public interface CommentMapper extends BaseMapper<Comment> {
         @Param("minLikes") Integer minLikes,
         @Param("limit") Integer limit
     );
+    
+    /**
+     * 批量根据ID查询评论（带用户信息，不区分根评论和子评论）
+     * @param commentIds 评论ID集合
+     * @return 评论BO列表（包含用户昵称和头像）
+     */
+    List<CommentLikeBO> selectCommentsByIdsWithUser(@Param("commentIds") List<Long> commentIds);
 }

@@ -13,25 +13,14 @@
         </foreach>
     </select>
 
-    <!-- 分页查询用户点赞的评论（带评论详情） -->
-    <select id="selectUserLikedCommentsBO" resultType="com.mawai.ghmbplus.dto.CommentLikeBO">
-        SELECT 
-            c.id AS comment_id,
-            c.gif_id,
-            c.content,
-            c.user_id,
-            c.like_count,
-            c.created_at,
-            u.nickname,
-            u.avatar,
-            cl.created_at AS liked_at
+    <!-- 查询用户所有点赞的评论ID（按点赞时间倒序） -->
+    <select id="selectUserLikedCommentIds" resultType="long">
+        SELECT cl.comment_id
         FROM comment_like cl
         INNER JOIN comment c ON cl.comment_id = c.id
-        INNER JOIN user u ON c.user_id = u.id
         WHERE cl.user_id = #{userId}
           AND c.status = 1
         ORDER BY cl.created_at DESC
-        LIMIT #{offset}, #{limit}
     </select>
 
     <!-- 批量插入评论点赞记录（忽略重复） -->

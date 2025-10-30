@@ -17,6 +17,7 @@ import com.mawai.ghmbplus.dao.CommentMapper;
 import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dto.ChildCommentBO;
 import com.mawai.ghmbplus.dto.ChildCountBO;
+import com.mawai.ghmbplus.dto.CommentDetailCacheBO;
 import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import com.mawai.ghmbplus.model.Comment;
@@ -59,8 +60,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private static final String COMMENT_LIKE_COUNT_KEY = "comment:like:"; // 评论点赞数缓存key
     private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:"; // 用户评论点赞缓存key
     private static final String USER_COMMENT_DISLIKE_KEY = "user:comment:dislike:"; // 用户评论取消点赞缓存key
-    private static final String COMMENT_DETAIL_ROOT_KEY = "comment:detail:root:"; // 评论详情根评论缓存key
-    private static final String COMMENT_DETAIL_CHILD_KEY = "comment:detail:child:"; // 评论详情子评论缓存key
+    private static final String COMMENT_DETAIL_KEY = "comment:detail:"; // 评论详情缓存key（Hash结构，统一根评论和子评论）
     private static final String COMMENT_ROOT_KEY = "comment:root:"; // 评论根评论缓存key
     private static final String COMMENT_CHILD_KEY = "comment:child:"; // 评论子评论缓存key
     private static final String COMMENT_HOT_ROOT_KEY = "comment:hot:root:"; // 热门根评论缓存key
@@ -269,16 +269,16 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             
             // 删除相关缓存
             String zsetKey;
-                if (comment.getRootCommentId() == null) {
+            if (comment.getRootCommentId() == null) {
                 // 根评论：删除ZSet、详情缓存、热门评论列表缓存
                 zsetKey = COMMENT_ROOT_KEY + comment.getGifId();
-                cacheService.delete(COMMENT_DETAIL_ROOT_KEY + commentId);
                 cacheService.delete(COMMENT_HOT_ROOT_KEY + comment.getGifId()); // 删除热门评论列表缓存
-                } else {
+            } else {
                 // 子评论：删除ZSet、详情缓存
                 zsetKey = COMMENT_CHILD_KEY + comment.getRootCommentId();
-                cacheService.delete(COMMENT_DETAIL_CHILD_KEY + commentId);
-                }
+            }
+            // 统一删除详情缓存（Hash结构）
+            cacheService.delete(COMMENT_DETAIL_KEY + commentId);
             cacheService.zsetRemove(zsetKey, commentId);
             
             log.info("用户{}软删除评论{}成功，已记录到待删除表", userId, commentId);
@@ -301,22 +301,84 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new IllegalArgumentException("用户ID不能为空");
         }
         
-        int offset = (pageNum - 1) * pageSize;
+        // 1. 从Redis查询用户当前点赞状态（likeSet和dislikeSet）
+        String likeSetKey = USER_COMMENT_LIKE_KEY + userId;
+        String dislikeSetKey = USER_COMMENT_DISLIKE_KEY + userId;
+        Set<String> likeSet = combineSet(likeSetKey);      // Redis新点赞（未刷DB）
+        Set<String> dislikeSet = combineSet(dislikeSetKey); // Redis取消点赞（未刷DB）
+
+        // 2. 从DB查询用户所有点赞的评论ID（按点赞时间倒序，只查ID）
+        List<Long> dbLikedIds = commentLikeMapper.selectUserLikedCommentIds(userId);
         
-        // 查询用户点赞的评论（返回BO）
-        List<CommentLikeBO> likeBOs = commentLikeMapper.selectUserLikedCommentsBO(userId, offset, pageSize);
+        // 3. 合并有效ID：先加Redis新点赞（最新），再加DB点赞（排除dislikeSet）
+        //    使用LinkedHashSet保持插入顺序
+        // 3.1 先加入Redis新点赞（优先显示最新的）
+        Set<String> validIds = new LinkedHashSet<>(likeSet);
         
-        if (likeBOs.isEmpty()) {
-            return new ArrayList<>();
+        // 3.2 再加入DB点赞（排除Redis中已取消点赞的）
+        for (Long id : dbLikedIds) {
+            String idStr = String.valueOf(id);
+            if (!dislikeSet.contains(idStr)) {
+                validIds.add(idStr); // LinkedHashSet自动去重
+            }
         }
         
-        // 使用 MapStruct 转换为CommentVO（BO → VO）
-        List<CommentVO> result = commentParamMapper.likeBoListToCommentVOList(likeBOs);
+        // 4. 内存分页（对合并后的ID列表分页）
+        List<String> validIdList = new ArrayList<>(validIds);
+        int start = (pageNum - 1) * pageSize;
+        int end = Math.min(start + pageSize, validIdList.size());
         
-        // 合并Redis增量点赞数
+        if (start >= validIdList.size()) {
+            log.info("用户{}点赞的评论历史分页超出范围", userId);
+            return new ArrayList<>(); // 超出范围，返回空列表
+        }
+        
+        List<String> pagedIds = validIdList.subList(start, end);
+        
+        // 5. 根据分页后的ID批量查询评论详情
+        List<CommentVO> result = batchGetCommentsByIds(pagedIds);
+        
+        // 6. 合并Redis增量点赞数
         mergeCommentLikeCounts(result);
         
         return result;
+    }
+
+    /**
+     * 批量查询评论详情（JOIN user表，获取用户昵称和头像）
+     * @param commentIds 评论ID列表
+     * @return 评论详情列表（已包含用户信息）
+     */
+    private List<CommentVO> batchGetCommentsByIds(List<String> commentIds) {
+        if (commentIds == null || commentIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        // 将String ID转换为Long ID
+        List<Long> longIds = commentIds.stream()
+                .map(Long::valueOf)
+                .toList();
+        
+        // 查询评论（JOIN user表获取昵称和头像）
+        List<CommentLikeBO> bos = commentMapper.selectCommentsByIdsWithUser(longIds);
+        
+        // 转换为CommentVO（使用已有的 likeBoListToCommentVOList）
+        return commentParamMapper.likeBoListToCommentVOList(bos);
+    }
+
+    /**
+     * 合并set和oldSet
+     * @param setKey set的key
+     * @return 合并后的set
+     */
+    private Set<String> combineSet(String setKey) {
+        Set<String> set = cacheService.getStringSetSafely(setKey, false);
+        Set<String> oldSet = cacheService.getStringSetSafely(setKey + ":old", false);
+        if (!oldSet.isEmpty()) {
+            set = new HashSet<>(set);
+            set.addAll(oldSet);
+        }
+        return set;
     }
 
     /**
@@ -487,7 +549,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 批量查询根评论（先查Redis缓存，未命中再查数据库）
+     * 批量查询根评论（先查Redis Hash缓存，未命中再查数据库）
      * 
      * @param commentIds 评论ID列表
     * @return 根评论列表
@@ -500,15 +562,20 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         Map<String, CommentVO> resultMap = new LinkedHashMap<>(); // 保持顺序
         List<Long> missedIds = new ArrayList<>(); // 缓存未命中的ID
         
-        // 1. 遍历所有ID，先从Redis缓存查询
+        // 1. 遍历所有ID，先从Redis Hash缓存查询
         for (String commentId : commentIds) {
-            String cacheKey = COMMENT_DETAIL_ROOT_KEY + commentId;
-            RootCommentBO cachedBO = cacheService.get(cacheKey);
+            String cacheKey = COMMENT_DETAIL_KEY + commentId;
+            Map<String, String> hash = cacheService.hashGetAll(cacheKey);
             
-            if (cachedBO != null) {
-                // 缓存命中，转换为VO
-                CommentVO vo = commentParamMapper.boToCommentVO(cachedBO);
-                resultMap.put(commentId, vo);
+            if (!hash.isEmpty()) {
+                // 缓存命中，从Hash解析为BO，再转换为VO
+                CommentDetailCacheBO cachedBO = CommentDetailCacheBO.fromHashMap(hash);
+                if (cachedBO != null) {
+                    CommentVO vo = commentParamMapper.cacheBoToCommentVO(cachedBO);
+                    resultMap.put(commentId, vo);
+                } else {
+                    missedIds.add(Long.parseLong(commentId));
+                }
             } else {
                 // 缓存未命中，记录ID
                 missedIds.add(Long.parseLong(commentId));
@@ -519,10 +586,12 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         if (!missedIds.isEmpty()) {
             List<RootCommentBO> bos = commentMapper.selectRootCommentsByIds(missedIds);
             
-            // 3. 将数据库查到的数据写回Redis，并加入结果
+            // 3. 将数据库查到的数据写回Redis Hash，并加入结果
             for (RootCommentBO bo : bos) {
-                String cacheKey = COMMENT_DETAIL_ROOT_KEY + bo.getId();
-                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+                // 转换为缓存BO并存储到Hash
+                CommentDetailCacheBO cacheBO = CommentDetailCacheBO.fromRoot(bo);
+                String cacheKey = COMMENT_DETAIL_KEY + bo.getId();
+                cacheService.hashSetAll(cacheKey, cacheBO.toHashMap(), COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
                 
                 CommentVO vo = commentParamMapper.boToCommentVO(bo);
                 resultMap.put(String.valueOf(bo.getId()), vo);
@@ -541,7 +610,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 批量查询子评论（先查Redis缓存，未命中再查数据库）
+     * 批量查询子评论（先查Redis Hash缓存，未命中再查数据库）
      * 
      * @param commentIds 评论ID列表
      * @return 子评论列表
@@ -554,15 +623,20 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         Map<String, CommentVO> resultMap = new LinkedHashMap<>(); // 保持顺序
         List<Long> missedIds = new ArrayList<>(); // 缓存未命中的ID
         
-        // 1. 遍历所有ID，先从Redis缓存查询
+        // 1. 遍历所有ID，先从Redis Hash缓存查询
         for (String commentId : commentIds) {
-            String cacheKey = COMMENT_DETAIL_CHILD_KEY + commentId;
-            ChildCommentBO cachedBO = cacheService.get(cacheKey);
+            String cacheKey = COMMENT_DETAIL_KEY + commentId;
+            Map<String, String> hash = cacheService.hashGetAll(cacheKey);
             
-            if (cachedBO != null) {
-                // 缓存命中，转换为VO
-                CommentVO vo = commentParamMapper.childBoToCommentVO(cachedBO);
-                resultMap.put(commentId, vo);
+            if (!hash.isEmpty()) {
+                // 缓存命中，从Hash解析为BO，再转换为VO
+                CommentDetailCacheBO cachedBO = CommentDetailCacheBO.fromHashMap(hash);
+                if (cachedBO != null) {
+                    CommentVO vo = commentParamMapper.cacheBoToCommentVO(cachedBO);
+                    resultMap.put(commentId, vo);
+                } else {
+                    missedIds.add(Long.parseLong(commentId));
+                }
             } else {
                 // 缓存未命中，记录ID
                 missedIds.add(Long.parseLong(commentId));
@@ -573,10 +647,12 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         if (!missedIds.isEmpty()) {
             List<ChildCommentBO> bos = commentMapper.selectChildCommentsByIds(missedIds);
             
-            // 3. 将数据库查到的数据写回Redis，并加入结果
+            // 3. 将数据库查到的数据写回Redis Hash，并加入结果
             for (ChildCommentBO bo : bos) {
-                String cacheKey = COMMENT_DETAIL_CHILD_KEY + bo.getId();
-                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+                // 转换为缓存BO并存储到Hash
+                CommentDetailCacheBO cacheBO = CommentDetailCacheBO.fromChild(bo);
+                String cacheKey = COMMENT_DETAIL_KEY + bo.getId();
+                cacheService.hashSetAll(cacheKey, cacheBO.toHashMap(), COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
                 
                 CommentVO vo = commentParamMapper.childBoToCommentVO(bo);
                 resultMap.put(String.valueOf(bo.getId()), vo);
@@ -595,7 +671,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 追加根评论到ZSet缓存 并设置detail_cache
+     * 追加根评论到ZSet缓存 并设置detail_cache（Hash结构）
      * 
      * @param gifId GIF ID
      * @param rootCommentBOs 根评论BO列表
@@ -615,10 +691,11 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             cacheService.zsetAddBatch(zsetKey, scoreMembers);
             cacheService.expire(zsetKey, ZSET_CACHE_TTL, TimeUnit.MINUTES);
             
-            // 遍历所有ID，设置detail_cache
+            // 遍历所有ID，设置detail_cache（Hash结构）
             for (RootCommentBO bo : rootCommentBOs) {
-                String cacheKey = COMMENT_DETAIL_ROOT_KEY + bo.getId();
-                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+                CommentDetailCacheBO cacheBO = CommentDetailCacheBO.fromRoot(bo);
+                String cacheKey = COMMENT_DETAIL_KEY + bo.getId();
+                cacheService.hashSetAll(cacheKey, cacheBO.toHashMap(), COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
             }
 
             log.info("追加根评论到ZSet: gifId={}, count={}", gifId, rootCommentBOs.size());
@@ -628,7 +705,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 追加子评论到ZSet缓存 并设置detail_cache
+     * 追加子评论到ZSet缓存 并设置detail_cache（Hash结构）
      */
     private void appendToChildCommentZSet(String rootCommentId, List<ChildCommentBO> childCommentBOs) {
         try {
@@ -645,10 +722,11 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             cacheService.zsetAddBatch(zsetKey, scoreMembers);
             cacheService.expire(zsetKey, ZSET_CACHE_TTL, TimeUnit.MINUTES);
 
-            // 遍历所有ID，设置detail_cache
+            // 遍历所有ID，设置detail_cache（Hash结构）
             for (ChildCommentBO bo : childCommentBOs) {
-                String cacheKey = COMMENT_DETAIL_CHILD_KEY + bo.getId();
-                cacheService.set(cacheKey, bo, COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+                CommentDetailCacheBO cacheBO = CommentDetailCacheBO.fromChild(bo);
+                String cacheKey = COMMENT_DETAIL_KEY + bo.getId();
+                cacheService.hashSetAll(cacheKey, cacheBO.toHashMap(), COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
             }
             
             log.info("追加子评论到ZSet: rootId={}, count={}", rootCommentId, childCommentBOs.size());

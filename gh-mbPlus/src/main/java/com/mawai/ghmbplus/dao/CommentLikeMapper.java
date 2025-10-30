@@ -30,15 +30,11 @@ public interface CommentLikeMapper extends BaseMapper<CommentLike> {
                                      @Param("commentIds") List<Long> commentIds);
 
     /**
-     * 分页查询用户点赞的评论（带评论详情）
+     * 查询用户所有点赞的评论ID（不分页，用于内存分页逻辑）
      * @param userId 用户ID
-     * @param offset 偏移量
-     * @param limit 限制数量
-     * @return 评论BO列表
+     * @return 评论ID列表
      */
-    List<CommentLikeBO> selectUserLikedCommentsBO(@Param("userId") Long userId,
-                                                   @Param("offset") Integer offset,
-                                                   @Param("limit") Integer limit);
+    List<Long> selectUserLikedCommentIds(@Param("userId") Long userId);
 
     /**
      * 批量插入评论点赞记录（使用唯一键去重）

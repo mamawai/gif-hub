@@ -12,6 +12,7 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
+import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
 import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dao.GifMapper;
@@ -48,6 +49,7 @@ public class GifScheduleExecutorWithSQS {
     private final CacheService cacheService;
     private final GifMapper gifMapper;
     private final CommentMapper commentMapper;
+    private final CommentLikeMapper commentLikeMapper;
     private final CommentPendingDeleteMapper commentPendingDeleteMapper;
     private final GifDeleteService gifDeleteService;
     private final GifDeleteFailedService gifDeleteFailedService;
@@ -70,8 +72,10 @@ public class GifScheduleExecutorWithSQS {
     private static final String USER_DISLIKE_KEY = "user:dislike:";
     private final static String HOT_TAG_KEY = "hotTag";
     private static final String COMMENT_LIKE_COUNT_KEY = "comment:like:";
+    private static final String COMMENT_DETAIL_KEY = "comment:detail:"; // 评论详情缓存key（Hash结构）
     private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:";
     private static final String USER_COMMENT_DISLIKE_KEY = "user:comment:dislike:";
+    private static final int COMMENT_DETAIL_CACHE_TTL = 60; // 评论详情缓存过期时间（分钟）
 
     @Value("${aws.sqs.base-queue-url}")
     private String SQS_QUEUE_URL;
@@ -696,7 +700,8 @@ public class GifScheduleExecutorWithSQS {
      *
      * <p><b>设计理念：</b>软删除 + 定时物理删除，避免误删且保持数据库整洁</p>
      */
-    @Scheduled(cron = "0 0 3 * * ?")
+//    @Scheduled(cron = "0 0 3 * * ?")
+    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000)
     public void cleanupDeletedComments() {
         try {
             int batchSize = 1000;
@@ -747,6 +752,11 @@ public class GifScheduleExecutorWithSQS {
                 LambdaQueryWrapper<Comment> deleteCommentWrapper = new LambdaQueryWrapper<>();
                 deleteCommentWrapper.in(Comment::getId, commentIds);
                 int deletedCount = commentMapper.delete(deleteCommentWrapper);
+
+                // 批量删除评论点赞记录
+                LambdaQueryWrapper<CommentLike> deleteCommentLikeWrapper = new LambdaQueryWrapper<>();
+                deleteCommentLikeWrapper.in(CommentLike::getCommentId, commentIds);
+                commentLikeMapper.delete(deleteCommentLikeWrapper);
                 
                 // 删除待删除表中的记录
                 LambdaQueryWrapper<CommentPendingDelete> deletePendingWrapper = new LambdaQueryWrapper<>();
@@ -775,6 +785,7 @@ public class GifScheduleExecutorWithSQS {
      * 同步评论点赞次数到数据库
      *
      * <p>从 Redis 扫描所有评论点赞计数键，提取非零值后批量更新数据库，并原子性重置 Redis 计数。</p>
+     * <p>同时使用 HINCRBY 原子更新评论详情缓存（Hash 结构）中的 likeCount 字段</p>
      *
      * <p><b>处理流程：</b></p>
      * <ol>
@@ -782,6 +793,7 @@ public class GifScheduleExecutorWithSQS {
      *   <li>过滤非零值并获取计数</li>
      *   <li>原子性重置 Redis 计数为 0</li>
      *   <li>批量更新数据库：{@code UPDATE comment SET like_count = like_count + ?}</li>
+     *   <li>使用 HINCRBY 原子更新 Hash 缓存：{@code comment:detail:commentId.likeCount}</li>
      * </ol>
      */
     private void syncCommentLikeCountsToDatabase() {
@@ -823,11 +835,43 @@ public class GifScheduleExecutorWithSQS {
                 return;
             }
             
-            // 统一处理
+            // 1. 先更新数据库（Source of Truth）
             int updatedCount = commentMapper.updateLikeCountBatchByMap(incrementMap);
+            log.info("DB更新成功：{}条评论点赞数已同步", updatedCount);
             
-            log.info("已批量更新{}个评论点赞数, 计划更新{}个, 相差{}个", 
-                    updatedCount, incrementMap.size(), incrementMap.size() - updatedCount);
+            // 2. DB更新成功后，使用 HINCRBY 原子更新 Hash 缓存中的 likeCount
+            int cacheUpdatedCount = 0;
+            int cacheDeletedCount = 0;
+            
+            for (Map.Entry<Long, Long> entry : incrementMap.entrySet()) {
+                Long commentId = entry.getKey();
+                Long increment = entry.getValue();
+                String hashKey = COMMENT_DETAIL_KEY + commentId;
+                
+                try {
+                    // 使用 HINCRBY 原子递增 likeCount 字段（如果 Hash 存在）
+                    if (cacheService.hasKey(hashKey)) {
+                        cacheService.hashIncrementWithExpire(hashKey, "likeCount", increment, 
+                                                            COMMENT_DETAIL_CACHE_TTL, TimeUnit.MINUTES);
+                        cacheUpdatedCount++;
+                    }
+                    // 如果缓存不存在，跳过（下次查询会从 DB 重建，数据一致）
+                } catch (Exception e) {
+                    log.warn("更新缓存 likeCount 失败，删除该缓存: commentId={}, error={}", 
+                            commentId, e.getMessage());
+                    // 更新失败，删除缓存以保证一致性
+                    try {
+                        cacheService.delete(hashKey);
+                        cacheDeletedCount++;
+                    } catch (Exception deleteEx) {
+                        log.warn("删除缓存失败，忽略: commentId={}", commentId);
+                        // 删除失败也无所谓，缓存会在 TTL 后过期
+                    }
+                }
+            }
+            
+            log.info("同步完成：DB已更新{}条，缓存已更新{}个，缓存已删除{}个", 
+                    updatedCount, cacheUpdatedCount, cacheDeletedCount);
             
         } catch (Exception e) {
             log.error("同步评论点赞数失败", e);

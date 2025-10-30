@@ -6,13 +6,14 @@
     <update id="updateLikeCountBatchByMap">
         UPDATE comment
         SET like_count = like_count + CASE id
-        <foreach collection="incrementMap.entrySet()" item="entry" separator=" ">
-            WHEN #{entry.key} THEN #{entry.value}
-        </foreach>
-        END
+            <foreach collection="incrementMap" index="commentId" item="increment" separator=" ">
+                WHEN #{commentId} THEN #{increment}
+            </foreach>
+        END,
+        updated_at = NOW()
         WHERE id IN
-        <foreach collection="incrementMap.keySet()" item="id" open="(" separator="," close=")">
-            #{id}
+        <foreach collection="incrementMap.keys" item="commentId" open="(" separator="," close=")">
+            #{commentId}
         </foreach>
     </update>
 
@@ -152,6 +153,26 @@
           AND c.like_count &gt;= #{minLikes}
         ORDER BY c.like_count DESC, c.created_at ASC
         LIMIT #{limit}
+    </select>
+
+    <!-- 批量根据ID查询评论（带用户信息，不区分根评论和子评论） -->
+    <select id="selectCommentsByIdsWithUser" resultType="com.mawai.ghmbplus.dto.CommentLikeBO">
+        SELECT 
+            c.id AS comment_id,
+            c.gif_id,
+            c.user_id,
+            c.content,
+            c.like_count,
+            c.created_at,
+            u.nickname,
+            u.avatar
+        FROM comment c
+        INNER JOIN user u ON c.user_id = u.id
+        WHERE c.id IN
+        <foreach collection="commentIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+          AND c.status = 1
     </select>
 
 </mapper>
