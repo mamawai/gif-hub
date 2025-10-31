@@ -33,11 +33,16 @@ public class EmailAuthController {
     @Operation(summary = "发送验证码", description = "向指定邮箱发送验证码")
     @PostMapping("/code")
     public ApiResponse<Boolean> sendVerificationCode(@RequestParam String email) {
-        boolean result = emailAuthService.sendVerificationCode(email);
-        if (result) {
-            return ApiResponse.success(true);
-        } else {
-            return ApiResponse.error(500, "发送验证码失败");
+        try {
+            boolean result = emailAuthService.sendVerificationCode(email);
+            if (result) {
+                return ApiResponse.success(true);
+            } else {
+                return ApiResponse.error(500, "发送验证码失败");
+            }
+        } catch (Exception e) {
+            String errorMessage = e.getMessage();
+            return ApiResponse.error(500, errorMessage);
         }
     }
 

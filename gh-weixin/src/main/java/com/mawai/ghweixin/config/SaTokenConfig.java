@@ -21,7 +21,8 @@ public class SaTokenConfig extends BaseSaTokenConfig {
             "/wechat/login",
             "/user/register", 
             "/user/code",
-            "/user/login"
+            "/user/login",
+            "/wechat/public_key"
     );
 
     /**

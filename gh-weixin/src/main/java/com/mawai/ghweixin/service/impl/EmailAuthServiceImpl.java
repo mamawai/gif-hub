@@ -11,6 +11,7 @@ import com.mawai.ghweixin.dto.UserInfoDTO;
 import com.mawai.ghweixin.service.EmailAuthService;
 import com.mawai.ghweixin.strategy.EmailStrategy;
 import com.mawai.ghweixin.utils.PasswordEncoder;
+import com.mawai.ghweixin.utils.RsaEncryptUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -85,7 +86,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             return true;
         } catch (Exception e) {
             log.error("发送验证码邮件失败: {}", e.getMessage(), e);
-            return false;
+            throw e;
         }
     }
     
@@ -183,7 +184,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             // 更新用户信息
             user.setEmail(email);
             user.setEmailVerified((byte) 1); // 注册
-            user.setPassword(passwordEncoder.encode(password)); // 密码加密存储
+            user.setPassword(passwordEncoder.encode(RsaEncryptUtil.decrypt(password))); // 先私钥解密，再密码加密存储
             user.setNickname(nickname);
             user.setStatus((byte) 1);  // 正常状态
             user.setUpdatedAt(LocalDateTime.now());
@@ -195,6 +196,9 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             // 设置邮箱认证状态
             StpUtil.getSession().set("emailAuth", "full");
 
+        } catch (Exception e) {
+            log.error("用户注册失败: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         } finally {
             // 操作完成后释放锁
             if (lockAcquired) {
@@ -227,10 +231,15 @@ public class EmailAuthServiceImpl implements EmailAuthService {
         }
         
         // 验证密码
-        if (!passwordEncoder.matches(password, user.getPassword())) {
-            throw new RuntimeException("密码错误");
+        try {
+            if (!passwordEncoder.matches(RsaEncryptUtil.decrypt(password), user.getPassword())) {
+                throw new RuntimeException("密码错误");
+            }
+        } catch (Exception e) {
+            log.error("密码验证失败: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
-        
+
         // 设置邮箱认证状态
         StpUtil.getSession().set("emailAuth", "full");
 
