@@ -4,12 +4,15 @@ import cn.hutool.core.util.StrUtil;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.constant.TagGifSortType;
 import com.mawai.ghgif.modelMapper.GifParamMapper;
+import com.mawai.ghgif.modelMapper.TagParamMapper;
 import com.mawai.ghgif.service.TagProcessService;
 import com.mawai.ghgif.util.PinYinUtils;
+import com.mawai.ghgif.vo.GifTagVO;
 import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.GifTagMapper;
 import com.mawai.ghmbplus.dao.TagMapper;
+import com.mawai.ghmbplus.dto.GifTagBO;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.Tag;
 import com.mawai.ghmbplus.service.TagService;
@@ -33,6 +36,7 @@ public class TagProcessServiceImpl implements TagProcessService {
     private final GifTagMapper gifTagMapper;
     private final GifMapper gifMapper;
     private final GifParamMapper gifParamMapper;
+    private final TagParamMapper tagParamMapper;
 
     private final static String TAG_KEY = "tag:"; // 标签缓存key
     private final static String HOT_TAG_KEY = "hotTag"; // 热门标签缓存key
@@ -171,7 +175,64 @@ public class TagProcessServiceImpl implements TagProcessService {
                 result.add(gifParamMapper.toGifVO(gif));
             }
         }
-        
+
         return result;
+    }
+
+    /**
+     * 根据 GIF ID 查询标签列表
+     *
+     * @param gifId GIF ID
+     * @return 标签列表（包含ID和名称）
+     */
+    @Override
+    public List<GifTagVO> getTagsByGifId(Long gifId) {
+        if (gifId == null) {
+            return Collections.emptyList();
+        }
+
+        // 查询数据库获取标签信息（BO）
+        List<GifTagBO> tagBOs = tagMapper.selectTagsByGifId(gifId);
+
+        // BO 转为 VO
+        return tagParamMapper.bosToTagVOs(tagBOs);
+    }
+
+    /**
+     * 根据标签 ID 查询 GIF 列表（TIME 排序，游标分页）
+     *
+     * @param tagId 标签 ID
+     * @param pageSize 每页数量
+     * @param lastId 游标分页最后一条记录 ID（首次查询不传）
+     * @param lastValue 游标分页最后一条记录排序值（首次查询不传）
+     * @return GIF 列表
+     */
+    @Override
+    public List<GifVO> getGifsByTagId(Long tagId, int pageSize, Long lastId, String lastValue) {
+        if (tagId == null || pageSize <= 0) {
+            return Collections.emptyList();
+        }
+
+        try {
+            // 直接使用 tagId 查询（单标签查询）
+            List<Long> tagIds = List.of(tagId);
+
+            // 查询 GIF ID 列表（TIME 排序，游标分页）
+            List<Long> gifIds = gifTagMapper.selectGifIdsByTagsOrderByTime(
+                    tagIds, tagIds.size(), pageSize, lastId, lastValue);
+
+            if (gifIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            // 批量查询 GIF 详情
+            List<Gif> gifs = gifMapper.selectGifsByIds(gifIds);
+
+            // 按照原始 gifIds 顺序重新排列
+            return sortGifsByIds(gifs, gifIds);
+        } catch (Exception e) {
+            log.error("根据标签ID {}查询GIF列表失败: {}", tagId, e.getMessage(), e);
+            return Collections.emptyList();
+        }
     }
 }

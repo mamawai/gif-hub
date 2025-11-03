@@ -1,5 +1,6 @@
 package com.mawai.ghmbplus.dao;
 
+import com.mawai.ghmbplus.dto.GifTagBO;
 import com.mawai.ghmbplus.model.Tag;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
@@ -51,4 +52,11 @@ public interface TagMapper extends BaseMapper<Tag> {
      * @return 标签列表
      */
     List<Long> selectIdsByNames(@Param("tags") List<String> tags);
+
+    /**
+     * 根据 GIF ID 查询标签列表（ID + 名称）
+     * @param gifId GIF ID
+     * @return 标签列表
+     */
+    List<GifTagBO> selectTagsByGifId(@Param("gifId") Long gifId);
 }

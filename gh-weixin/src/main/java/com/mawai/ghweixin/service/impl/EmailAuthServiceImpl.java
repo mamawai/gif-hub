@@ -237,7 +237,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             }
         } catch (Exception e) {
             log.error("密码验证失败: {}", e.getMessage(), e);
-            throw new RuntimeException(e);
+            throw new RuntimeException(e.getMessage());
         }
 
         // 设置邮箱认证状态

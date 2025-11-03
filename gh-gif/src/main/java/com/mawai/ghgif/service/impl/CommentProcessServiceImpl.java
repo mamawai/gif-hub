@@ -14,14 +14,12 @@ import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
-import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dto.ChildCommentBO;
 import com.mawai.ghmbplus.dto.ChildCountBO;
 import com.mawai.ghmbplus.dto.CommentDetailCacheBO;
 import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.dto.RootCommentBO;
 import com.mawai.ghmbplus.model.Comment;
-import com.mawai.ghmbplus.model.CommentPendingDelete;
 import com.mawai.ghmbplus.service.CommentService;
 
 import cn.hutool.core.util.StrUtil;
@@ -51,7 +49,6 @@ public class CommentProcessServiceImpl implements CommentProcessService {
 
     private final CommentService commentService;
     private final CommentMapper commentMapper;
-    private final CommentPendingDeleteMapper commentPendingDeleteMapper;
     private final CommentLikeMapper commentLikeMapper;
     private final CommentParamMapper commentParamMapper;
     private final CacheService cacheService;
@@ -97,10 +94,29 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new IllegalArgumentException("评论内容不能为空");
         }
 
-        // 1. 预生成评论ID（使用雪花算法）
+        // 1. 如果是回复评论，校验父评论是否存在且未删除
+        // 注意：由于删除根评论会级联删除所有子评论，所以只需检查父评论状态即可 -- 也就是把所有涉及到删除的评论的status都set为0
+        if (StrUtil.isNotBlank(commentDTO.getParentId())) {
+            Long parentId = Long.parseLong(commentDTO.getParentId());
+            Comment parentComment = commentService.lambdaQuery()
+                .select(Comment::getId, Comment::getStatus)
+                .eq(Comment::getId, parentId)
+                .one();
+            
+            if (parentComment == null) {
+                throw new IllegalArgumentException("评论不存在");
+            }
+            if (parentComment.getStatus() != 1) {
+                throw new IllegalArgumentException("评论已被删除");
+            }
+            
+            log.info("用户{}回复评论{}，校验通过", userId, commentDTO.getParentId());
+        }
+
+        // 2. 预生成评论ID（使用雪花算法）
         Long commentId = IdWorker.getId();
 
-        // 2. 构建CommentMessage
+        // 3. 构建CommentMessage
         CommentMessage commentMessage = new CommentMessage();
         commentMessage.setCommentId(commentId);  // ✅ 设置预生成的ID
         commentMessage.setUserId(userId);
@@ -108,7 +124,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         commentMessage.setContent(commentDTO.getContent().trim());
         commentMessage.setParentId(commentDTO.getParentId());
 
-        // 3. 发送到SQS
+        // 4. 发送到SQS
         try {
             messageService.send(
                 JSONUtil.toJsonStr(commentMessage),
@@ -123,7 +139,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new RuntimeException("评论提交失败，请稍后重试", e);
         }
         
-        // 4. 返回包含ID的CommentVO（简化版本，只包含id）
+        // 5. 返回包含ID的CommentVO（简化版本，只包含id）
         CommentVO commentVO = new CommentVO();
         commentVO.setId(String.valueOf(commentId));
         return commentVO;
@@ -227,14 +243,13 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     }
     
     /**
-     * 删除评论（软删除，只删除根评论或子评论本身，不级联）
+     * 删除评论（软删除，根评论级联删除子评论）
      * 
      * <p>删除策略</p>
      * <ul>
      *   <li>软删除：设置 status=0</li>
-     *   <li>不级联删除：删除根评论时，子评论保留显示</li>
-     *   <li>记录到表：将评论ID记录到 comment_pending_delete 表</li>
-     *   <li>定时清理：定时任务从表中获取ID批量物理删除</li>
+     *   <li>级联删除：删除根评论时，所有子评论（root_comment_id = 根评论ID）也会被删除</li>
+     *   <li>子评论删除：删除子评论时，其他回复它的子评论不受影响（只看root_comment_id）</li>
      * </ul>
      * 
      * @param commentId 评论ID
@@ -247,8 +262,10 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         if (StrUtil.isBlank(commentId)|| userId == null) {
             throw new IllegalArgumentException("参数不能为空");
         }
+        // 将String ID转换为Long ID
+        Long commentIdLong = Long.parseLong(commentId);
 
-        Comment comment = commentService.getById(Long.parseLong(commentId));
+        Comment comment = commentService.getById(commentIdLong);
         if (comment == null) {
             throw new RuntimeException("评论不存在");
         }
@@ -258,30 +275,49 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new RuntimeException("无权删除他人评论");
         }
 
-        // 软删除：更新status为0
+        // 判断是否为根评论
+        boolean isRootComment = comment.getRootCommentId() == null;
+        
+        if (isRootComment) {
+            // 根评论：直接根据root_comment_id级联软删除所有子评论
+            commentService.lambdaUpdate()
+                .eq(Comment::getRootCommentId, commentIdLong)
+                .set(Comment::getStatus, 0)
+                .update();
+            
+            log.info("根评论{}被删除，级联软删除了所有子评论", commentId);
+        }
+        
+        // 软删除当前评论
         comment.setStatus((byte) 0);
         boolean result = commentService.updateById(comment);
         
         if (result) {
-            // 将评论ID记录到待删除表
-            CommentPendingDelete pendingDelete = new CommentPendingDelete().setCommentId(Long.parseLong(commentId));
-            commentPendingDeleteMapper.insert(pendingDelete);
-            
-            // 删除相关缓存
-            String zsetKey;
-            if (comment.getRootCommentId() == null) {
-                // 根评论：删除ZSet、详情缓存、热门评论列表缓存
-                zsetKey = COMMENT_ROOT_KEY + comment.getGifId();
-                cacheService.delete(COMMENT_HOT_ROOT_KEY + comment.getGifId()); // 删除热门评论列表缓存
+            // 清理缓存
+            if (isRootComment) {
+                // 根评论
+                // 1.GIF的根评论ZSet 从 comment:root:{gifId} 中 ZREM 该评论ID
+                String rootZsetKey = COMMENT_ROOT_KEY + comment.getGifId();
+                cacheService.zsetRemove(rootZsetKey, commentId);
+                // 2.热门根评论列表（List类型，直接删除整个列表）
+                String hotRootKey = COMMENT_HOT_ROOT_KEY + comment.getGifId();
+                cacheService.delete(hotRootKey);
+                // 3.根评论详情缓存
+                String detailKey = COMMENT_DETAIL_KEY + commentId;
+                cacheService.delete(detailKey);
+                // 4.清理根评论的所有子评论
+                String childZsetKey = COMMENT_CHILD_KEY + commentId;
+                cacheService.delete(childZsetKey);
+                // 5. 子评论详情缓存不删除，让其自然过期（60分钟）
             } else {
-                // 子评论：删除ZSet、详情缓存
-                zsetKey = COMMENT_CHILD_KEY + comment.getRootCommentId();
+                // 子评论
+                // 1.子评论ZSet 从 comment:child:{rootCommentId} 中 ZREM 该评论ID
+                String childZsetKey = COMMENT_CHILD_KEY + comment.getRootCommentId();
+                cacheService.zsetRemove(childZsetKey, commentId);
+                // 2.子评论详情缓存
+                String detailKey = COMMENT_DETAIL_KEY + commentId;
+                cacheService.delete(detailKey);
             }
-            // 统一删除详情缓存（Hash结构）
-            cacheService.delete(COMMENT_DETAIL_KEY + commentId);
-            cacheService.zsetRemove(zsetKey, commentId);
-            
-            log.info("用户{}软删除评论{}成功，已记录到待删除表", userId, commentId);
         }
         
         return result;
@@ -1064,7 +1100,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @return 热门根评论列表
      */
     private List<CommentVO> retryGetFromCache(String hotKey, String gifId) {
-        List<String> hotCommentIds = null;
+        List<String> hotCommentIds;
         
         // 重试多次，给获得锁的线程足够时间完成查询和写缓存
         for (int i = 0; i < CACHE_RETRY_TIMES; i++) {

@@ -21,12 +21,42 @@ public class GifDTO {
     @Schema(description = "用户ID", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private Long userId;
 
-    @Schema(description = "gif标题", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    @Schema(description = "gif标题", requiredMode = Schema.RequiredMode.REQUIRED)
     private String title;
 
     @Schema(description = "gif描述", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private String description;
 
     @Schema(description = "gif标签", requiredMode = Schema.RequiredMode.REQUIRED)
-    private List<String> tags;
+    private String tags;
+
+    /**
+     * 验证参数
+     */
+    public String validate() {
+        if (title == null || title.trim().isEmpty()) {
+            return "标题不能为空";
+        }
+
+        if (tags == null || tags.isEmpty()) {
+            return "标签不能为空";
+        }
+
+        List<String> tagList = List.of(tags.split(","));
+
+        if (tagList.size() > 3) {
+            return "最多只能有3个标签";
+        }
+
+        for (String eachTag : tagList) {
+            if (eachTag == null || eachTag.trim().isEmpty()) {
+                return "标签不能为空";
+            }
+            if (eachTag.length() > 10) {
+                return "标签'" + eachTag + "'长度不能超过10个字符";
+            }
+        }
+
+        return null;
+    }
 }

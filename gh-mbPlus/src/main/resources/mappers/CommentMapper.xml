@@ -175,4 +175,19 @@
           AND c.status = 1
     </select>
 
+    <!-- 清理软删除评论及其点赞记录 -->
+    <delete id="deleteCommentsAndCommentLikes">
+        DELETE c, cl FROM comment c
+        LEFT JOIN comment_like cl ON c.id = cl.comment_id
+        WHERE c.status = 0
+          AND c.updated_at &lt; #{expireTime}
+    </delete>
+
+    <!-- 清理孤儿点赞记录（comment_id 在 comment 表中不存在） -->
+    <delete id="deleteOrphanCommentLikes">
+        DELETE cl FROM comment_like cl
+        LEFT JOIN comment c ON cl.comment_id = c.id
+        WHERE c.id IS NULL
+    </delete>
+
 </mapper>

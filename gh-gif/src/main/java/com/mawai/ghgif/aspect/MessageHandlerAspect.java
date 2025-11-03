@@ -51,7 +51,7 @@ public class MessageHandlerAspect {
         } catch (Throwable throwable) {
             hasException = true;
             exceptionMessage = throwable.getMessage();
-            log.error("=== GIF消息处理异常 === 异常信息: {}", exceptionMessage);
+            log.error("=== GIF消息处理异常 === 异常信息: {}", throwable.getMessage(), throwable);
             throw throwable;
         } finally {
             // 记录结束时间和执行耗时

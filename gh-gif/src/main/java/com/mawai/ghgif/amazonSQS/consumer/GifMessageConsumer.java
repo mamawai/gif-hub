@@ -3,6 +3,8 @@ package com.mawai.ghgif.amazonSQS.consumer;
 import cn.hutool.json.JSONUtil;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
+import com.mawai.ghgif.amazonSQS.idempotent.IdempotentHandler;
+import com.mawai.ghgif.amazonSQS.idempotent.IdempotentResult;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.MessageService;
@@ -41,10 +43,13 @@ public class GifMessageConsumer implements MessageConsumer {
     private final TagMapper tagMapper;
     private final GifTagService gifTagService;
     private final PinYinUtils pinYinUtils;
+    private final IdempotentHandler idempotentHandler;
+
+    private static final String CONSUMER_TYPE = "gif";
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
-    private static final String GIF_MSG = "gif:msg:";
     private static final String HANDLE_GIF_MSG_FAIL = "gif:msg:fail:";
     private final static String TAG_KEY = "tag:";
+
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;
 
@@ -57,66 +62,97 @@ public class GifMessageConsumer implements MessageConsumer {
     public void handle(Message message) {
         String body = message.body();
         String messageId = message.messageId();
-        log.info("GifMessageConsumer: 处理GIF消息: {}", body);
+        log.info("GifMessageConsumer: 处理GIF消息: messageId={}, body={}", messageId, body);
 
         // 判断是否poll的是空消息
-        if (body.isBlank()) return;
+        if (body.isBlank()) {
+            log.warn("接收到空消息，忽略处理");
+            return;
+        }
 
-        GifMessage gifMessage = null;
-        String key = null;
-        try {
-            gifMessage = JSONUtil.toBean(body, GifMessage.class);
-            Long userId = gifMessage.getUserId();
-            key = GIF_MSG + messageId;
-            Number value = cacheService.getNumber(key);
-            // 幂等性校验
-            if (value != null && value.longValue() == -1) {
-                log.info("GIF消息已处理成功，丢弃消息: {}", message);
-                messageService.deleteMessage(message.receiptHandle(), queueUrl);
-                return;
-            }
+        // 解析消息（提前解析，用于异常处理）
+        GifMessage gifMessage = JSONUtil.toBean(body, GifMessage.class);
 
-            // 保存GIF信息
-            Gif gif = buildGifFromMessage(gifMessage);
-            if (!gifService.insertOne(gif)) throw new RuntimeException("保存GIF文件失败");
-            log.info("保存GIF文件成功，ID: {}", gif.getId());
+        // 使用幂等性处理器执行业务逻辑
+        IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
+            try {
+                Long userId = gifMessage.getUserId();
 
-            // 保存标签信息（如果存在）
-            if (gifMessage.getTags() != null && !gifMessage.getTags().isEmpty()) {
-                saveGifTags(gif.getId(), gifMessage.getTags());
-            }
-
-            // 可在这里模拟抛出异常 throw new RuntimeException("模拟异常");
-
-            // 事务成功后的回调
-            String finalKey = key;
-            registerAfterCommit(() -> {
-                try {
-                    // 增加GIF总数
-                    incrementTotalGifCount(userId);
-                    // 删除SQS消息
-                    messageService.deleteMessage(message.receiptHandle(), queueUrl);
-                    // 处理成功加锁 / 这里 -1 区分重试和成功
-                    cacheService.set(finalKey, -1L, 6L, TimeUnit.HOURS);
-                    log.info("SQS消息删除成功，messageId: {}", messageId);
-                } catch (Exception e) {
-                    log.error("删除SQS消息失败，messageId: {}", messageId, e);
+                // 保存GIF信息
+                Gif gif = buildGifFromMessage(gifMessage);
+                if (!gifService.insertOne(gif)) {
+                    log.error("保存GIF文件失败: gifMessage={}", gifMessage);
+                    return false;
                 }
-            });
+                log.info("保存GIF文件成功，ID: {}", gif.getId());
 
-        } catch (Exception e) {
-            log.error("保存GIF文件失败，Message信息: {}", message, e);
-            Long times = null;
-            if (key != null) {
-                times = cacheService.increment(key, 1);
+                // 保存标签信息（如果存在）
+                if (gifMessage.getTags() != null && !gifMessage.getTags().isBlank()) {
+                    saveGifTags(gif.getId(), gifMessage.getTags());
+                }
+
+                // 事务成功后的回调
+                registerAfterCommit(() -> {
+                    try {
+                        // 增加GIF总数
+                        incrementTotalGifCount(userId);
+                        // 删除SQS消息
+                        messageService.deleteMessage(message.receiptHandle(), queueUrl);
+                        log.info("SQS消息删除成功，messageId: {}", messageId);
+                    } catch (Exception e) {
+                        log.error("删除SQS消息失败，messageId: {}", messageId, e);
+                    }
+                });
+
+                return true;
+
+            } catch (Exception e) {
+                log.error("处理GIF消息业务逻辑失败: messageId={}", messageId, e);
+                throw new RuntimeException("处理GIF消息失败: " + e.getMessage(), e);
             }
-            // 记录失败信息 -- 等待clearDeletedGifs删除r2文件
-            // 通过代理调用，确保事务注解生效
-            // 要等times为 3 才处理 因为SQS重试机制会重试3次，3次后路由到死信队列
-            if (gifMessage != null && times != null && times == 3) {
-                SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
-            }
-            throw new RuntimeException("保存GIF文件失败: " + e.getMessage(), e);
+        });
+
+        // 处理幂等性结果
+        handleIdempotentResult(result, message, gifMessage);
+    }
+
+    /**
+     * 处理幂等性结果
+     */
+    private void handleIdempotentResult(IdempotentResult result, Message message, GifMessage gifMessage) {
+        String messageId = message.messageId();
+
+        switch (result.getStatus()) {
+            case ALREADY_PROCESSED:
+                // 消息已处理，删除 SQS 消息
+                messageService.deleteMessage(message.receiptHandle(), queueUrl);
+                break;
+
+            case PROCESSING:
+                // 消息正在处理中，跳过
+                break;
+
+            case SUCCESS:
+                // 处理成功（已在事务回调中删除消息）
+                break;
+
+            case FAILED:
+            case EXCEPTION:
+                // 处理失败或异常
+                long retryTimes = result.getRetryTimes();
+                log.warn("GIF消息处理失败，重试次数: {}", retryTimes);
+
+                // 重试3次后仍失败，记录删除信息（等待clearDeletedGifs删除r2文件）
+                if (idempotentHandler.isExceedMaxRetry(retryTimes)) {
+                    log.error("GIF消息处理失败3次，记录删除文件，messageId: {}", messageId);
+                    SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
+                }
+
+                // 重新抛出异常，触发事务回滚
+                if (result.shouldThrowException()) {
+                    throw new RuntimeException("处理GIF消息失败: " + result.getException().getMessage(), result.getException());
+                }
+                break;
         }
     }
 
@@ -141,8 +177,9 @@ public class GifMessageConsumer implements MessageConsumer {
      * 保存GIF标签信息
      */
     // TODO 这里可以延后创建关联等审核通过后再创建tag再关联上gif
-    private void saveGifTags(Long gifId, List<String> tags) {
-        for (String tagName : tags) {
+    private void saveGifTags(Long gifId, String tags) {
+        List<String> tagNames = List.of(tags.split(","));
+        for (String tagName : tagNames) {
             // 1. 查找或创建Tag
             Long tagId = findOrCreateTag(tagName);
 
@@ -158,7 +195,7 @@ public class GifMessageConsumer implements MessageConsumer {
                 throw new RuntimeException("保存GIF标签关联失败");
             }
         }
-        log.info("保存GIF标签成功，GIF ID: {}, 标签数量: {}", gifId, tags.size());
+        log.info("保存GIF标签成功，GIF ID: {}, 标签数量: {}", gifId, tagNames.size());
     }
 
     /**

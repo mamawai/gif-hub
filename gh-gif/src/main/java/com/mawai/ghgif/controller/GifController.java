@@ -41,7 +41,11 @@ public class GifController {
             Long userId = StpUtil.getLoginIdAsLong();
             gifDTO.setUserId(userId);
 
-            // 2. 验证文件
+            // 2. 验证DTO
+            String validationError = gifDTO.validate();
+            if (validationError != null) return ApiResponse.error(400, validationError);
+
+            // 验证文件
             String fileValidation = validationService.validateFile(gifDTO.getFile());
             if (fileValidation != null) return ApiResponse.error(400, fileValidation);
 
@@ -98,8 +102,8 @@ public class GifController {
      * @return 更新结果
      */
     @Operation(summary = "更新GIF下载次数", description = "更新GIF下载次数")
-    @GetMapping("/download")
-    public ApiResponse<Boolean> recordDownload(@RequestParam("fileId") String fileId) {
+    @GetMapping("/download/{fileId}")
+    public ApiResponse<Boolean> recordDownload(@PathVariable String fileId) {
         try {
             boolean result = gifProcessService.updateDownloadCount(fileId);
             return ApiResponse.success(result);

@@ -74,10 +74,7 @@ public class RateLimiterAspect {
                     "1"  // 请求1个令牌
             );
 
-            if (result == 1) {
-                // 限流通过，执行目标方法
-                return joinPoint.proceed();
-            } else {
+            if (result != 1) {
                 // 限流被拒绝
                 log.warn("Rate limit exceeded for key: {}, method: {}", 
                         key, joinPoint.getSignature().toShortString());
@@ -87,10 +84,15 @@ public class RateLimiterAspect {
             // 重新抛出限流异常
             throw e;
         } catch (Exception e) {
+            // 只捕获限流器本身的异常（如Redis连接失败等）
             log.error("Rate limiter execution failed", e);
             // 发生异常时，为了安全起见，拒绝请求
             throw new RateLimitException("系统异常，请稍后再试");
         }
+        
+        // 限流通过后，执行目标方法
+        // 目标方法的异常会正常向上抛出，不会被包装成限流异常
+        return joinPoint.proceed();
     }
 
     /**

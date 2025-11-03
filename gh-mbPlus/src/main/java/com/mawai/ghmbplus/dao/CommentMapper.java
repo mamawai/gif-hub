@@ -102,4 +102,16 @@ public interface CommentMapper extends BaseMapper<Comment> {
      * @return 评论BO列表（包含用户昵称和头像）
      */
     List<CommentLikeBO> selectCommentsByIdsWithUser(@Param("commentIds") List<Long> commentIds);
+
+    /**
+     * 清理软删除评论及其点赞记录
+     * @param expireTime 过期时间
+     */
+    int deleteCommentsAndCommentLikes(@Param("expireTime") LocalDateTime expireTime);
+
+    /**
+     * 清理孤儿点赞记录（comment_id 在 comment 表中不存在）
+     * @return 删除的孤儿记录数量
+     */
+    int deleteOrphanCommentLikes();
 }

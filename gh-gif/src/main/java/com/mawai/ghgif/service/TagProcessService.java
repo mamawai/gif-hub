@@ -1,6 +1,7 @@
 package com.mawai.ghgif.service;
 
 import com.mawai.ghgif.constant.TagGifSortType;
+import com.mawai.ghgif.vo.GifTagVO;
 import com.mawai.ghgif.vo.GifVO;
 
 import java.util.List;
@@ -36,5 +37,24 @@ public interface TagProcessService {
      * @return GIF列表
      */
     List<GifVO> getTagGifs(List<String> tags, int page, int pageSize, TagGifSortType sortType, Long lastId, String lastValue);
+
+    /**
+     * 根据 GIF ID 查询标签列表
+     *
+     * @param gifId GIF ID
+     * @return 标签列表（包含ID和名称）
+     */
+    List<GifTagVO> getTagsByGifId(Long gifId);
+
+    /**
+     * 根据标签 ID 查询 GIF 列表（TIME 排序，游标分页）
+     *
+     * @param tagId 标签 ID
+     * @param pageSize 每页数量
+     * @param lastId 游标分页最后一条记录 ID（首次查询不传）
+     * @param lastValue 游标分页最后一条记录排序值（首次查询不传）
+     * @return GIF 列表
+     */
+    List<GifVO> getGifsByTagId(Long tagId, int pageSize, Long lastId, String lastValue);
 
 }

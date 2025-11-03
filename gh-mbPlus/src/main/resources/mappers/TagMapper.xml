@@ -11,16 +11,14 @@
 
     <update id="updateUseCountByMap" parameterType="java.util.Map">
         UPDATE tag
-        <set>
-            use_count = CASE id
-                <foreach item="entry" collection="tagIdCountMap.entrySet()" separator="," open="(" close=")">
-                    WHEN #{entry.key} THEN use_count - #{entry.value}
-                </foreach>
-            END
-        </set>
+        SET use_count = CASE
+            <foreach collection="tagIdCountMap" item="count" index="tagId" separator=" ">
+                WHEN id = #{tagId} THEN use_count - #{count}
+            </foreach>
+        END
         WHERE id IN
-        <foreach item="id" collection="tagIdCountMap.keySet()" separator="," open="(" close=")">
-            #{id}
+        <foreach collection="tagIdCountMap" item="count" index="tagId" separator="," open="(" close=")">
+            #{tagId}
         </foreach>
     </update>
 
@@ -37,6 +35,13 @@
         <foreach item="name" collection="tags" separator="," open="(" close=")">
             #{name}
         </foreach>
+    </select>
+
+    <select id="selectTagsByGifId" resultType="com.mawai.ghmbplus.dto.GifTagBO">
+        SELECT t.id AS tagId, t.name AS tagName
+        FROM tag t
+        INNER JOIN gif_tag gt ON t.id = gt.tag_id
+        WHERE gt.gif_id = #{gifId}
     </select>
 
 </mapper>

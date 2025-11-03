@@ -7,7 +7,6 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serial;
 import java.io.Serializable;
-import java.util.List;
 
 /**
  * GIF处理消息
@@ -25,6 +24,6 @@ public class GifMessage implements Serializable {
     private String title;
     private String fileUrl;
     private String description;
-    private List<String> tags;
+    private String tags;
     private Integer fileSize;
 }

@@ -12,6 +12,7 @@ import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
+import com.mawai.ghmbplus.model.Comment;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
@@ -19,6 +20,7 @@ import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.UserLike;
+import com.mawai.ghmbplus.service.CommentService;
 import com.mawai.ghmbplus.service.GifDeleteService;
 import com.mawai.ghmbplus.service.GifService;
 import com.mawai.ghmbplus.service.UserLikeService;
@@ -68,6 +70,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final UserLikeService userLikeService;
     private final GifParamMapper gifParamMapper;
     private final GifDeleteService gifDeleteService;
+    private final CommentService commentService;
     private final CacheService cacheService;
     private final MessageService messageService;
     // 注入线程池
@@ -193,7 +196,7 @@ public class GifProcessServiceImpl implements GifProcessService {
         Long userId = gifDTO.getUserId();
         String title = gifDTO.getTitle();
         String description = gifDTO.getDescription();
-        List<String> tags = gifDTO.getTags();
+        String tags = gifDTO.getTags();
 
         String gifFileName = null;
         // auto close stream
@@ -417,6 +420,13 @@ public class GifProcessServiceImpl implements GifProcessService {
                 log.warn("GIF文件不存在: {}", fileId);
                 return false;
             }
+
+            // 软删除fileId下的所有评论
+            boolean updated = commentService.lambdaUpdate()
+                    .eq(Comment::getGifId, Long.parseLong(fileId))
+                    .set(Comment::getStatus, 0)
+                    .update();
+            log.info("软删除GIF文件下的所有评论: {}", updated);
 
             // 保存删除的文件到删除表中
             GifDelete gifDelete = new GifDelete();

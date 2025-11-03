@@ -1,6 +1,5 @@
 package com.mawai.ghmbplus.dao;
 
-import com.mawai.ghmbplus.dto.CommentLikeBO;
 import com.mawai.ghmbplus.model.CommentLike;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;

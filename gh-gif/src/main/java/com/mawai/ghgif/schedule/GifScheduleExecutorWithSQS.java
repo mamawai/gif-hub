@@ -12,9 +12,7 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
-import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
-import com.mawai.ghmbplus.dao.CommentPendingDeleteMapper;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.*;
@@ -49,8 +47,6 @@ public class GifScheduleExecutorWithSQS {
     private final CacheService cacheService;
     private final GifMapper gifMapper;
     private final CommentMapper commentMapper;
-    private final CommentLikeMapper commentLikeMapper;
-    private final CommentPendingDeleteMapper commentPendingDeleteMapper;
     private final GifDeleteService gifDeleteService;
     private final GifDeleteFailedService gifDeleteFailedService;
     private final MessageService messageService;
@@ -689,96 +685,44 @@ public class GifScheduleExecutorWithSQS {
     /**
      * 定时清理软删除的评论（物理删除）
      *
-     * <p>每天凌晨 3 点执行，从待删除表批量物理删除评论记录。</p>
+     * <p>每天凌晨 3 点执行，使用多表 DELETE 一次性删除评论及其点赞记录。</p>
      *
      * <p><b>处理流程：</b></p>
      * <ol>
-     *   <li>从 comment_pending_delete 表查询待删除评论 ID</li>
-     *   <li>批量物理删除 comment 表中的记录</li>
-     *   <li>删除 comment_pending_delete 表中的对应记录</li>
+     *   <li>使用 LEFT JOIN 同时删除 comment 和 comment_like 表的数据</li>
+     *   <li>WHERE 条件：status=0 且 updated_at &lt; NOW() - 1天</li>
      * </ol>
      *
-     * <p><b>设计理念：</b>软删除 + 定时物理删除，避免误删且保持数据库整洁</p>
+     * <p><b>设计理念：</b>软删除 + 定时物理删除，24小时缓冲期避免误删</p>
+     * <p><b>适用场景：</b>包括用户删除的评论和因GIF被删除而软删除的评论</p>
+     * <p><b>返回值：</b>删除的总行数（comment + comment_like）</p>
      */
-//    @Scheduled(cron = "0 0 3 * * ?")
-    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000)
+    // @Scheduled(cron = "0 0 3 * * ?")
+    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 测试用
     public void cleanupDeletedComments() {
         try {
-            int batchSize = 1000;
-            // 从待删除表获取ID
-            log.info("开始从待删除表获取评论ID...");
-            int tableDeletedCount = deleteCommentsFromPendingTable(batchSize);
-            
-            // 汇总日志
-            log.info("定时清理完成：共物理删除 {} 条评论", tableDeletedCount);
+            // LocalDateTime expireTime = LocalDateTime.now().minusDays(1);
+            // log.info("开始清理软删除评论（24小时前）...");
+
+            LocalDateTime expireTime = LocalDateTime.now();
+            log.info("开始清理软删除评论（当前）...");
+
+            // 1. 清理软删除评论及其点赞记录
+            int deletedCount = commentMapper.deleteCommentsAndCommentLikes(expireTime);
+            if (deletedCount == 0) {
+                log.info("没有需要清理的过期评论");
+            } else {
+                log.info("定时清理完成：共物理删除 {} 条过期评论及其点赞记录", deletedCount);
+            }
+
+            // 2. 清理孤儿点赞记录（点赞后评论被删除的情况）
+            int orphanCount = commentMapper.deleteOrphanCommentLikes();
+            if (orphanCount > 0) {
+                log.info("清理孤儿点赞记录完成：共删除 {} 条", orphanCount);
+            }
         } catch (Exception e) {
             log.error("清理软删除评论失败", e);
         }
-    }
-    
-    /**
-     * 从待删除表批量删除评论
-     *
-     * <p>循环处理待删除表中的记录，每次处理一批，直到表为空。</p>
-     *
-     * @param batchSize 每批处理数量
-     * @return 总共删除的评论数量
-     */
-    private int deleteCommentsFromPendingTable(int batchSize) {
-        int totalDeleted = 0;
-        try {
-            while (true) {
-                // 从待删除表查询ID
-                LambdaQueryWrapper<CommentPendingDelete> queryWrapper = new LambdaQueryWrapper<>();
-                queryWrapper.last("LIMIT " + batchSize);
-                
-                List<CommentPendingDelete> pendingList = commentPendingDeleteMapper.selectList(queryWrapper);
-                
-                if (pendingList.isEmpty()) {
-                    break; // 待删除表为空
-                }
-                
-                // 提取评论ID
-                List<Long> commentIds = pendingList.stream()
-                        .map(CommentPendingDelete::getCommentId)
-                        .collect(Collectors.toList());
-                
-                // 提取待删除记录ID
-                List<Long> pendingIds = pendingList.stream()
-                        .map(CommentPendingDelete::getId)
-                        .collect(Collectors.toList());
-                
-                // 批量删除评论
-                LambdaQueryWrapper<Comment> deleteCommentWrapper = new LambdaQueryWrapper<>();
-                deleteCommentWrapper.in(Comment::getId, commentIds);
-                int deletedCount = commentMapper.delete(deleteCommentWrapper);
-
-                // 批量删除评论点赞记录
-                LambdaQueryWrapper<CommentLike> deleteCommentLikeWrapper = new LambdaQueryWrapper<>();
-                deleteCommentLikeWrapper.in(CommentLike::getCommentId, commentIds);
-                commentLikeMapper.delete(deleteCommentLikeWrapper);
-                
-                // 删除待删除表中的记录
-                LambdaQueryWrapper<CommentPendingDelete> deletePendingWrapper = new LambdaQueryWrapper<>();
-                deletePendingWrapper.in(CommentPendingDelete::getId, pendingIds);
-                commentPendingDeleteMapper.delete(deletePendingWrapper);
-                
-                totalDeleted += deletedCount;
-                
-                if (deletedCount > 0) {
-                    log.info("从待删除表删除 {} 条评论", deletedCount);
-                }
-                
-                // 如果本批次少于batchSize，说明已经处理完了
-                if (pendingList.size() < batchSize) {
-                    break;
-                }
-
-            }
-        } catch (Exception e) {
-            log.error("从待删除表删除评论失败", e);
-        }
-        return totalDeleted;
     }
     
     /**
