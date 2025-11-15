@@ -57,6 +57,10 @@ public class GifScheduleExecutorWithSQS {
     private final Executor scheduledExecutor;
     // 虚拟线程执行器，用于数据获取（IO密集型）
     private final Executor virtualDataFetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    // 虚拟线程并发控制 - 限制同时处理的用户数据获取任务数量
+    // 避免在用户数量过多时创建过多虚拟线程导致内存溢出
+    private static final int DATA_FETCH_CONCURRENCY_LIMIT = 300;
+    private final Semaphore dataFetchSemaphore = new Semaphore(DATA_FETCH_CONCURRENCY_LIMIT);
     private final R2FileUtils r2FileUtils;
 
     private static final int SYNC_INTERVAL = 1; // 同步间隔
@@ -383,16 +387,29 @@ public class GifScheduleExecutorWithSQS {
             userIds.forEach(userId ->
                     CompletableFuture.runAsync(() -> {
                         try {
-                            UserLikeData data = fetchSingleUserData(userId);
-                            if (data != null) {
-                                // send to SQS
-                                UserLikesMessage userLikesMessage = UserLikesMessage.builder()
-                                        .userId(data.userId)
-                                        .deleteLikes(data.deleteLikes)
-                                        .newLikes(data.newLikes)
-                                        .build();
-                                messageService.send(JSONUtil.toJsonStr(userLikesMessage), SQS_QUEUE_URL, MessageType.USER_LIKES_MESSAGE);
+                            // 添加 30 秒超时,避免无限等待导致虚拟线程阻塞
+                            if (!dataFetchSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                                log.error("syncUserLikes获取数据信号量超时(30s),用户ID: {}", userId);
+                                return;
                             }
+                            try {
+                                UserLikeData data = fetchSingleUserData(userId);
+                                if (data != null) {
+                                    // send to SQS
+                                    UserLikesMessage userLikesMessage = UserLikesMessage.builder()
+                                            .userId(data.userId)
+                                            .deleteLikes(data.deleteLikes)
+                                            .newLikes(data.newLikes)
+                                            .build();
+                                    messageService.send(JSONUtil.toJsonStr(userLikesMessage), SQS_QUEUE_URL, MessageType.USER_LIKES_MESSAGE);
+                                }
+                            } finally {
+                                // 释放信号量许可
+                                dataFetchSemaphore.release();
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            log.warn("syncUserLikes等待信号量许可时被中断，用户ID: {}", userId);
                         } catch (Exception e) {
                             log.error("获取用户{}数据失败: {}", userId, e.getMessage(), e);
                         }
@@ -863,21 +880,34 @@ public class GifScheduleExecutorWithSQS {
             userIds.forEach(userId ->
                 CompletableFuture.runAsync(() -> {
                     try {
-                        CommentLikesMessage message = fetchSingleUserCommentData(userId);
-                        if (message != null) {
-                            // 发送到SQS
-                            messageService.send(
-                                JSONUtil.toJsonStr(message), 
-                                SQS_QUEUE_URL, 
-                                MessageType.COMMENT_LIKES_MESSAGE
-                            );
-                            int newCount = message.getNewLikes() != null ? message.getNewLikes().size() : 0;
-                            int deleteCount = message.getDeleteLikes() != null ? message.getDeleteLikes().size() : 0;
-                            log.info("已发送用户{}的评论点赞数据到SQS，新增{}条，删除{}条", 
-                                    message.getUserId(), newCount, deleteCount);
+                        // 添加 30 秒超时,避免无限等待导致虚拟线程阻塞
+                        if (!dataFetchSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                            log.error("syncUserCommentLikes获取数据信号量超时(30s),用户ID: {}", userId);
+                            return;
                         }
+                        try {
+                            CommentLikesMessage message = fetchSingleUserCommentData(userId);
+                            if (message != null) {
+                                // 发送到SQS
+                                messageService.send(
+                                    JSONUtil.toJsonStr(message),
+                                    SQS_QUEUE_URL,
+                                    MessageType.COMMENT_LIKES_MESSAGE
+                                );
+                                int newCount = message.getNewLikes() != null ? message.getNewLikes().size() : 0;
+                                int deleteCount = message.getDeleteLikes() != null ? message.getDeleteLikes().size() : 0;
+                                log.info("已发送用户{}的评论点赞数据到SQS，新增{}条，删除{}条",
+                                        message.getUserId(), newCount, deleteCount);
+                            }
+                        } finally {
+                            // 释放信号量许可
+                            dataFetchSemaphore.release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        log.warn("syncUserCommentLikes等待信号量许可时被中断，用户ID: {}", userId);
                     } catch (Exception e) {
-                        log.error("处理用户{}评论点赞数据失败: 错误: {}", 
+                        log.error("处理用户{}评论点赞数据失败: 错误: {}",
                                 userId, e.getMessage(), e);
                     }
                 }, virtualDataFetchExecutor)); // 使用虚拟线程池

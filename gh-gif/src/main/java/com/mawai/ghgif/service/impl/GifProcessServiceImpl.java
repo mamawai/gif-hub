@@ -52,6 +52,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -75,7 +76,11 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final MessageService messageService;
     // 注入线程池
     private final Executor fileUploadExecutor;
-    
+    // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
+    // 避免批量上传时触发 R2 API 限流或占用过多网络带宽
+    private static final int FILE_UPLOAD_CONCURRENCY_LIMIT = 100;
+    private final Semaphore fileUploadSemaphore = new Semaphore(FILE_UPLOAD_CONCURRENCY_LIMIT);
+
     // S3客户端实例
     private S3Client s3Client;
     
@@ -281,10 +286,25 @@ public class GifProcessServiceImpl implements GifProcessService {
             GifDTO gifDTO = gifsDTO.get(i);
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
-                    // 使用 getAopProxy 获取代理对象，确保 @RateLimiter 切面生效
-                    String url = SpringUtils.getAopProxy(this).r2uploadGif(gifDTO);
-                    // 按原始索引位置存储结果
-                    urlArray[index] = url;
+                    // 添加 30 秒超时,避免无限等待导致虚拟线程阻塞
+                    if (!fileUploadSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                        log.error("获取文件上传信号量超时(30s),文件索引: {}", index);
+                        exceptionArray[index] = new RuntimeException("获取上传信号量超时");
+                        return;
+                    }
+                    try {
+                        // 使用 getAopProxy 获取代理对象，确保 @RateLimiter 切面生效
+                        String url = SpringUtils.getAopProxy(this).r2uploadGif(gifDTO);
+                        // 按原始索引位置存储结果
+                        urlArray[index] = url;
+                    } finally {
+                        // 释放信号量许可
+                        fileUploadSemaphore.release();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("等待文件上传信号量许可时被中断，文件索引: {}", index);
+                    exceptionArray[index] = e;
                 } catch (Exception e) {
                     // 记录异常但不中断其他上传，保持与文件相同的索引位置
                     exceptionArray[index] = e;

@@ -45,11 +45,11 @@ public class GifController {
             String validationError = gifDTO.validate();
             if (validationError != null) return ApiResponse.error(400, validationError);
 
-            // 验证文件
+            // 3. 验证文件格式
             String fileValidation = validationService.validateFile(gifDTO.getFile());
             if (fileValidation != null) return ApiResponse.error(400, fileValidation);
 
-            // 3. 执行上传
+            // 4. 执行上传
             String url = gifProcessService.r2uploadGif(gifDTO);
                 
             return ApiResponse.success(url);
@@ -79,7 +79,7 @@ public class GifController {
             String validationError = batchUploadDTO.validate();
             if (validationError != null) return ApiResponse.error(400, validationError);
 
-            // 3. 验证所有文件
+            // 3. 验证所有文件格式
             String fileValidation = validationService.validateFiles(batchUploadDTO.getFiles());
             if (fileValidation != null) return ApiResponse.error(400, fileValidation);
             

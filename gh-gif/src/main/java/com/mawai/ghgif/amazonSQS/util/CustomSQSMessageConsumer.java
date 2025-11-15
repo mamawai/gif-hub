@@ -26,9 +26,11 @@ import java.util.function.Consumer;
 public class CustomSQSMessageConsumer implements AutoCloseable {
 
     // 全局共享的缓存线程池
+    // 所有 Consumer 实例共享此线程池,每个 Consumer 根据 pollingThreadCount 创建对应数量的轮询线程
+    // 线程名格式: SQS-Polling-{queueName}-{threadId}
     private static final ExecutorService executor = Executors.newCachedThreadPool(
         r -> {
-            Thread thread = new Thread(r, "CustomSQSMessageConsumer-" + System.currentTimeMillis());
+            Thread thread = new Thread(r);
             thread.setDaemon(true);
             return thread;
         }
@@ -57,7 +59,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     // 状态控制
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CountDownLatch terminated;
-    private static final int CONCURRENCY_LIMIT = 600; // Semaphore最大并发数 -- Hikari10个线程支持6000tps，这里最大并发先设置为600 1/10
+    private static final int CONCURRENCY_LIMIT = 300; // Semaphore最大并发数 -- Hikari10个线程支持6000tps
     private final Semaphore messageSemaphore = new Semaphore(CONCURRENCY_LIMIT); // 控制消息处理并发数
     
 
@@ -88,12 +90,34 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
         if (shuttingDown.get()) {
             throw new IllegalStateException("消费者已关闭，无法启动");
         }
-        
-        log.info("启动SQS消费者，队列: {}", queueUrl);
+
+        // 从队列 URL 中提取队列名称,用于线程命名
+        String queueName = extractQueueName(queueUrl);
+
+        log.info("启动SQS消费者，队列: {}, 轮询线程数: {}", queueUrl, pollingThreadCount);
         for (int i = 0; i < pollingThreadCount; i++) {
             final int threadId = i;
-            executor.execute(() -> pollMessages(threadId));
+            executor.execute(() -> {
+                // 设置线程名,包含队列名和线程ID,便于日志追踪
+                Thread.currentThread().setName("SQS-Polling-" + queueName + "-" + threadId);
+                pollMessages();
+            });
         }
+    }
+
+    /**
+     * 从队列 URL 中提取队列名称 <br/>
+     * 例如: <a href="">https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue</a> -> MyQueue
+     */
+    private String extractQueueName(String queueUrl) {
+        if (queueUrl == null || queueUrl.isEmpty()) {
+            return "unknown";
+        }
+        int lastSlashIndex = queueUrl.lastIndexOf('/');
+        if (lastSlashIndex >= 0 && lastSlashIndex < queueUrl.length() - 1) {
+            return queueUrl.substring(lastSlashIndex + 1);
+        }
+        return "unknown";
     }
 
 
@@ -101,8 +125,9 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
      * 轮询消息的主循环
      */
     @SuppressWarnings("BusyWait")
-    private void pollMessages(int threadId) {
-        log.info("轮询线程-{} 开始运行", threadId);
+    private void pollMessages() {
+        String threadName = Thread.currentThread().getName();
+        log.info("[{}] 轮询线程开始运行，队列: {}", threadName, queueUrl);
         try {
             while (!Thread.interrupted() && !shuttingDown.get()) {
                 try {
@@ -117,7 +142,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
                     List<Message> messages = sqsClient.receiveMessage(request).messages();
 
                     if (!messages.isEmpty()) {
-                        log.info("轮询线程-{} 接收到 {} 条消息", threadId, messages.size());
+                        log.info("[{}] 接收到 {} 条消息", threadName, messages.size());
                         // 使用虚拟线程和信号量处理每个消息
                         messages.forEach(message -> {
                             vte.submit(() -> handleMessageWithSemaphore(message));
@@ -125,24 +150,24 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
                         // parallelStream并行处理
                         // messages.parallelStream().forEach(this::handleMessage);
                     } else {
-                        log.info("轮询线程-{} 没有收到消息", threadId);
+                        log.debug("[{}] 没有收到消息", threadName);
                     }
 
                 } catch (QueueDoesNotExistException e) {
-                    log.warn("队列不存在: {}，等待1秒后重试", queueUrl);
+                    log.warn("[{}] 队列不存在: {}，等待1秒后重试", threadName, queueUrl);
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException ex) {
                         Thread.currentThread().interrupt();
                     }
                 } catch (Exception e) {
-                    log.error("轮询线程-{} 出现异常", threadId, e);
+                    log.error("[{}] 轮询出现异常", threadName, e);
                     exceptionHandler.accept(e);
                 }
             }
         } finally {
             terminated.countDown();
-            log.info("轮询线程-{} 已停止", threadId);
+            log.info("[{}] 轮询线程已停止", threadName);
         }
     }
 
@@ -151,8 +176,13 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
      */
     private void handleMessageWithSemaphore(Message message) {
         try {
-            // 获取信号量许可，如果获取不到则阻塞等待
-            messageSemaphore.acquire();
+            // 添加 30 秒超时,避免无限等待导致虚拟线程阻塞
+            if (!messageSemaphore.tryAcquire(30, TimeUnit.SECONDS)) {
+                log.error("获取信号量超时(30s),消息处理失败: messageId={}", message.messageId());
+                // 不主动重置可见性,让消息在可见性超时后自然重新可见
+                // 消息会在下次 poll 时增加接收计数,达到 3 次后自动进入 DLQ
+                return;
+            }
             try {
                 // 在虚拟线程中处理消息
                 handleMessage(message);

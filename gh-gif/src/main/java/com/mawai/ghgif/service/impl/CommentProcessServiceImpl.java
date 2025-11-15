@@ -11,6 +11,7 @@ import com.mawai.ghgif.dto.CommentDTO;
 import com.mawai.ghgif.modelMapper.CommentParamMapper;
 import com.mawai.ghgif.service.CommentProcessService;
 import com.mawai.ghgif.service.MessageService;
+import com.mawai.ghgif.service.ModerationService;
 import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
@@ -34,6 +35,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -53,6 +55,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private final CommentParamMapper commentParamMapper;
     private final CacheService cacheService;
     private final MessageService messageService;
+    private final ModerationService moderationService;
     
     private static final String COMMENT_LIKE_COUNT_KEY = "comment:like:"; // 评论点赞数缓存key
     private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:"; // 用户评论点赞缓存key
@@ -94,60 +97,158 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             throw new IllegalArgumentException("评论内容不能为空");
         }
 
-        // 1. 如果是回复评论，校验父评论是否存在且未删除
-        // 注意：由于删除根评论会级联删除所有子评论，所以只需检查父评论状态即可 -- 也就是把所有涉及到删除的评论的status都set为0
+        // 并行执行审核、父评论校验、预生成ID和构建消息
+        CommentMessage commentMessage;
         if (StrUtil.isNotBlank(commentDTO.getParentId())) {
-            Long parentId = Long.parseLong(commentDTO.getParentId());
-            Comment parentComment = commentService.lambdaQuery()
-                .select(Comment::getId, Comment::getStatus)
-                .eq(Comment::getId, parentId)
-                .one();
-            
-            if (parentComment == null) {
-                throw new IllegalArgumentException("评论不存在");
-            }
-            if (parentComment.getStatus() != 1) {
-                throw new IllegalArgumentException("评论已被删除");
-            }
-            
-            log.info("用户{}回复评论{}，校验通过", userId, commentDTO.getParentId());
+            // 有父评论：并行执行审核和父评论校验
+            commentMessage = parallelValidateAndBuildMessage(commentDTO, userId, true);
+        } else {
+            // 根评论：并行执行审核和构建消息
+            commentMessage = parallelValidateAndBuildMessage(commentDTO, userId, false);
         }
 
-        // 2. 预生成评论ID（使用雪花算法）
-        Long commentId = IdWorker.getId();
-
-        // 3. 构建CommentMessage
-        CommentMessage commentMessage = new CommentMessage();
-        commentMessage.setCommentId(commentId);  // ✅ 设置预生成的ID
-        commentMessage.setUserId(userId);
-        commentMessage.setGifId(commentDTO.getGifId());
-        commentMessage.setContent(commentDTO.getContent().trim());
-        commentMessage.setParentId(commentDTO.getParentId());
-
-        // 4. 发送到SQS
+        // 发送到SQS
         try {
             messageService.send(
                 JSONUtil.toJsonStr(commentMessage),
                 SQS_QUEUE_URL,
                 MessageType.COMMENT_MESSAGE
             );
-            log.info("评论消息发送成功: userId={}, commentId={}, gifId={}", 
-                    userId, commentId, commentDTO.getGifId());
+            log.info("评论消息发送成功: userId={}, commentId={}, gifId={}",
+                    userId, commentMessage.getCommentId(), commentDTO.getGifId());
         } catch (Exception e) {
-            log.error("评论消息发送失败: userId={}, commentId={}, gifId={}, error={}", 
-                    userId, commentId, commentDTO.getGifId(), e.getMessage(), e);
+            log.error("评论消息发送失败: userId={}, commentId={}, gifId={}, error={}",
+                    userId, commentMessage.getCommentId(), commentDTO.getGifId(), e.getMessage(), e);
             throw new RuntimeException("评论提交失败，请稍后重试", e);
         }
-        
-        // 5. 返回包含ID的CommentVO（简化版本，只包含id）
+
+        // 返回包含ID的CommentVO（简化版本，只包含id）
         CommentVO commentVO = new CommentVO();
-        commentVO.setId(String.valueOf(commentId));
+        commentVO.setId(String.valueOf(commentMessage.getCommentId()));
         return commentVO;
     }
 
     /**
+     * 并行执行评论内容审核、父评论校验、预生成ID和构建消息
+     *
+     * <p>使用 CompletableFuture 并行执行两个任务：</p>
+     * <ul>
+     *   <li>任务1: 评论内容审核（调用 OpenAI Moderation API，耗时 1-3 秒）</li>
+     *   <li>任务2: 校验父评论 + 预生成评论ID（数据库查询 10-50ms + 雪花算法 0ms）</li>
+     * </ul>
+     *
+     * <p><b>快速失败机制：</b>任一任务失败会立即抛出异常，不等待其他任务完成</p>
+     * <p><b>性能优化：</b>如果父评论不存在，可能只需 10-50ms 就返回错误，无需等待审核完成</p>
+     *
+     * @param commentDTO 评论DTO
+     * @param userId 用户ID
+     * @param hasParent 是否有父评论
+     * @return 构建好的 CommentMessage
+     * @throws IllegalArgumentException 父评论不存在或已删除
+     * @throws RuntimeException 审核失败或内容违规
+     */
+    private CommentMessage parallelValidateAndBuildMessage(CommentDTO commentDTO, Long userId, boolean hasParent) {
+        // 任务1: 评论内容审核
+        CompletableFuture<Void> moderationTask = CompletableFuture.runAsync(() -> validateCommentContent(commentDTO.getContent(), userId));
+
+        // 任务2: 校验父评论 + 预生成评论ID + 构建消息
+        CompletableFuture<CommentMessage> buildMessageTask;
+        if (hasParent) {
+            Long parentId = Long.parseLong(commentDTO.getParentId());
+            buildMessageTask = CompletableFuture.supplyAsync(() -> {
+                // 先校验父评论（可能快速失败）
+                Comment parentComment = commentService.lambdaQuery()
+                    .select(Comment::getId, Comment::getStatus)
+                    .eq(Comment::getId, parentId)
+                    .one();
+
+                if (parentComment == null) {
+                    throw new IllegalArgumentException("评论不存在");
+                }
+                if (parentComment.getStatus() != 1) {
+                    throw new IllegalArgumentException("评论已被删除");
+                }
+
+                log.info("用户{}回复评论{}，父评论校验通过", userId, parentId);
+
+                // 校验通过后生成ID并构建消息
+                return buildCommentMessage(commentDTO, userId);
+            });
+        } else {
+            // 根评论：生成ID并构建消息
+            buildMessageTask = CompletableFuture.supplyAsync(() -> buildCommentMessage(commentDTO, userId));
+        }
+
+        // 等待所有任务完成（任一失败会抛出异常）
+        try {
+            CompletableFuture.allOf(moderationTask, buildMessageTask).join();
+            // 返回构建好的消息
+            return buildMessageTask.join();
+        } catch (Exception e) {
+            // 获取真实的异常原因
+            Throwable cause = e.getCause();
+            if (cause instanceof IllegalArgumentException) {
+                throw (IllegalArgumentException) cause;
+            } else if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            } else {
+                throw new RuntimeException("评论校验失败: " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * 构建 CommentMessage
+     *
+     * @param commentDTO 评论DTO
+     * @param userId 用户ID
+     * @return 构建好的 CommentMessage
+     */
+    private CommentMessage buildCommentMessage(CommentDTO commentDTO, Long userId) {
+        Long commentId = IdWorker.getId();
+        CommentMessage commentMessage = new CommentMessage();
+        commentMessage.setCommentId(commentId);
+        commentMessage.setUserId(userId);
+        commentMessage.setGifId(commentDTO.getGifId());
+        commentMessage.setContent(commentDTO.getContent().trim());
+        commentMessage.setParentId(commentDTO.getParentId());
+        return commentMessage;
+    }
+
+    /**
+     * 验证评论内容（调用审核服务）
+     *
+     * @param content 评论内容
+     * @param userId 用户ID
+     * @throws IllegalArgumentException 内容违规
+     * @throws RuntimeException 审核服务异常
+     */
+    private void validateCommentContent(String content, Long userId) {
+        ModerationService.ModerationResult moderationResult = moderationService.moderateText(content);
+
+        if (moderationResult.isFlagged()) {
+            String contentPreview = content.substring(0, Math.min(50, content.length()));
+            log.warn("用户{}发表的评论内容违规: content='{}', violations={}, scores={}",
+                    userId, contentPreview,
+                    moderationResult.getViolatedCategories(),
+                    moderationResult.getCategoryScores());
+            // 返回给用户的信息（不带分数，更友好）
+            throw new IllegalArgumentException(moderationResult.getSimpleViolationMessage());
+        }
+
+        if (moderationResult.isError()) {
+            String contentPreview = content.substring(0, Math.min(50, content.length()));
+            log.error("用户{}评论审核失败: content='{}', error={}",
+                    userId, contentPreview, moderationResult.getErrorMessage());
+            throw new RuntimeException(moderationResult.getErrorMessage());
+        }
+
+        log.info("用户{}发表的评论内容安全，通过审核", userId);
+    }
+
+    /**
      * 丰富根评论数据（子评论数量、点赞状态）
-     * 
+     *
      * @param comments 根评论列表
      * @param userId 用户ID
      */
