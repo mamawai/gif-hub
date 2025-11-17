@@ -1,15 +1,16 @@
 package com.mawai.ghcommon.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.Limit;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.*;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +22,9 @@ import java.util.concurrent.TimeUnit;
 @Service
 @RequiredArgsConstructor
 public class CacheService {
+
+    private static final int COUNTER_SCAN_BATCH_SIZE = 500;
+    private static final byte[] ZERO_BYTES = "0".getBytes(StandardCharsets.UTF_8);
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final StringRedisTemplate stringRedisTemplate;
@@ -625,51 +629,121 @@ public class CacheService {
     }
 
     /**
-     * 一次Redis请求完成：扫描匹配模式的key + 过滤非零值 + 获取值 + 重置为0
-     * @param pattern 键的模式，如"gif:like:*"
-     * @return 包含重置前非零值的键值对Map
+     * 扫描并重置非零计数器（Pipeline 优化）
+     *
+     * <p>功能：使用 SCAN 渐进式遍历匹配的键，通过 GETSET 原子操作读取旧值并重置为 0，自动恢复 TTL
+     * <p>场景：定时同步 Redis 计数器到数据库（如点赞数、浏览数）
+     *
+     * @param pattern 键的匹配模式，如 "gif:like:*"
+     * @return 重置前非零计数器的 Map（key -> 旧值），值为 0 的键不返回
      */
     public Map<String, Long> scanAndResetNonZeroCounters(String pattern) {
-        // 使用SCAN + 过滤 + 获取 + 重置的Lua脚本
-        String scriptText = 
-            "local result = {}; " +
-            "local cursor = '0'; " +
-            "repeat " +
-            "    local scanResult = redis.call('SCAN', cursor, 'MATCH', ARGV[1]); " +
-            "    cursor = scanResult[1]; " +
-            "    local keys = scanResult[2]; " +
-            "    for i = 1, #keys do " +
-            "        local value = redis.call('GET', keys[i]); " +
-            "        if value and tonumber(value) ~= 0 then " +
-            "            result[keys[i]] = tonumber(value); " +
-            "            local ttl = redis.call('TTL', keys[i]); " + // 获取原来过期时间
-            "            if ttl ~= -1 then " + // 不为-1，则设置过期时间为原来过期时间ttl
-            "                redis.call('SET', keys[i], 0, 'EX', ttl); " +
-            "            else " + // 如果为-1，则不设置过期时间
-            "                redis.call('SET', keys[i], 0); " +
-            "            end " +
-            "        end " +
-            "    end " +
-            "until cursor == '0'; " +
-            "return cjson.encode(result);";
+        // 存储所有非零计数器的结果
+        Map<String, Long> counterMap = new HashMap<>();
         
-        RedisScript<String> script = RedisScript.of(scriptText, String.class);
-        
+        // 配置 SCAN 选项：匹配模式和每次迭代建议返回数量
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(pattern)
+                .count(COUNTER_SCAN_BATCH_SIZE)  // 每次 SCAN 建议返回 500 个键
+                .build();
+
         try {
-            // 使用StringRedisTemplate执行脚本，传入pattern参数
-            String result = stringRedisTemplate.execute(script, List.of(), pattern);
-            
-            if (result.trim().isEmpty()) {
-                return new HashMap<>();
-            }
-            
-            // 解析JSON结果
-            return objectMapper.readValue(result, new TypeReference<>() {
+            // 使用 RedisCallback 获取底层 RedisConnection，支持 Pipeline 操作
+            stringRedisTemplate.execute((RedisCallback<Void>) connection -> {
+                processCountersWithPipeline(connection, options, counterMap);
+                return null;
             });
         } catch (Exception e) {
             log.error("扫描并重置非零计数器失败: pattern={}, 错误: {}", pattern, e.getMessage(), e);
-            return new HashMap<>();
         }
+
+        return counterMap;
+    }
+
+    /**
+     * 使用 Pipeline 批量处理计数器
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>SCAN 遍历键，每 500 个键收集为一批</li>
+     *   <li>对每批调用 processBatch 进行 Pipeline 处理</li>
+     * </ol>
+     *
+     * @param connection Redis 连接
+     * @param options SCAN 配置
+     * @param counterMap 结果收集 Map
+     */
+    private void processCountersWithPipeline(RedisConnection connection,
+                                             ScanOptions options,
+                                             Map<String, Long> counterMap) {
+        try (Cursor<byte[]> cursor = connection.keyCommands().scan(options)) {
+            List<byte[]> batchKeys = new ArrayList<>(COUNTER_SCAN_BATCH_SIZE);
+            
+            while (cursor.hasNext()) {
+                batchKeys.add(cursor.next());
+                
+                if (batchKeys.size() >= COUNTER_SCAN_BATCH_SIZE) {
+                    processBatch(connection, batchKeys, counterMap);
+                    batchKeys.clear();
+                }
+            }
+            
+            if (!batchKeys.isEmpty()) {
+                processBatch(connection, batchKeys, counterMap);
+            }
+        }
+    }
+
+    /**
+     * 处理单批计数器
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>Pipeline 1：批量执行 PTTL + GETSET，获取 TTL 和旧值并重置为 0</li>
+     *   <li>解析结果：过滤非零值，记录到 counterMap</li>
+     *   <li>Pipeline 2：批量恢复 TTL（GETSET 会清除过期时间）</li>
+     * </ol>
+     *
+     * @param connection Redis 连接
+     * @param batchKeys 批次键列表
+     * @param counterMap 结果收集 Map
+     */
+    private void processBatch(RedisConnection connection,
+                             List<byte[]> batchKeys,
+                             Map<String, Long> counterMap) {
+        if (batchKeys.isEmpty()) {
+            return;
+        }
+
+        // Pipeline 1: PTTL + GETSET
+        connection.openPipeline();
+        for (byte[] key : batchKeys) {
+            connection.keyCommands().pTtl(key);
+            connection.stringCommands().getSet(key, ZERO_BYTES);
+        }
+        List<Object> replies = connection.closePipeline();
+
+        // 解析结果 & 直接恢复 TTL
+        connection.openPipeline();
+        for (int i = 0; i < batchKeys.size(); i++) {
+            Object ttlObj = replies.get(i * 2);
+            Object valueObj = replies.get(i * 2 + 1);
+
+            byte[] valueBytes = valueObj instanceof byte[] vb ? vb : null;
+            if (valueBytes == null) continue;
+
+            long value = Long.parseLong(new String(valueBytes, StandardCharsets.UTF_8));
+            
+            if (value != 0) {
+                String keyStr = new String(batchKeys.get(i), StandardCharsets.UTF_8);
+                counterMap.put(keyStr, value);
+            }
+
+            if (ttlObj instanceof Number number && number.longValue() > 0) {
+                connection.keyCommands().pExpire(batchKeys.get(i), number.longValue());
+            }
+        }
+        connection.closePipeline();
     }
 
     /**
