@@ -19,7 +19,9 @@ public enum MessageType {
     
     COMMENT_LIKES_MESSAGE("commentLikes"),
     
-    COMMENT_MESSAGE("comment");
+    COMMENT_MESSAGE("comment"),
+    
+    GIPHY_MESSAGE("giphy");
 
     private final String value;
 

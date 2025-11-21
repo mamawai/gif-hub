@@ -101,3 +101,9 @@ openai:
       self-harm: 0.35                 # 自残内容
       self-harm/intent: 0.30          # 自残意图
       self-harm/instructions: 0.25    # 自残教唆（零容忍）
+
+# Giphy API配置
+giphy:
+  api:
+    key:
+    base-url: https://api.giphy.com/v1/gifs

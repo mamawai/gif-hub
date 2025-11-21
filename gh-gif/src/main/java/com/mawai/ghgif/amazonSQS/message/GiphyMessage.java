@@ -1,6 +1,6 @@
 package com.mawai.ghgif.amazonSQS.message;
 
-import com.mawai.ghmbplus.model.CommentLike;
+import com.mawai.ghgif.dto.GiphyDTO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -8,35 +8,35 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serial;
 import java.io.Serializable;
-import java.util.List;
 
 /**
- * 评论点赞消息（支持新增和删除）
- * 
+ * Giphy GIF 添加消息
+ * 用于从 Giphy 引入 GIF 到系统
+ *
  * @author mawai
- * @since 2025-10-17
+ * @since 2025-11-20
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CommentLikesMessage implements Serializable {
+public class GiphyMessage implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
     /**
-     * 用户ID
+     * Giphy GIF 数据
+     */
+    private GiphyDTO giphyDTO;
+
+    /**
+     * 添加的用户ID
      */
     private Long userId;
 
     /**
-     * 新增的点赞记录
+     * 默认喜欢的分类ID
      */
-    private List<CommentLike> newLikes;
-
-    /**
-     * 删除的点赞记录（取消点赞）
-     */
-    private List<CommentLike> deleteLikes;
+    private Long categoryId;
 }

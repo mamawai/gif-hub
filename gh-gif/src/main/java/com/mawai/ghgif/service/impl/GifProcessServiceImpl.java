@@ -5,11 +5,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.GifMessage;
+import com.mawai.ghgif.amazonSQS.message.GiphyMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.constant.RateLimiterType;
 import com.mawai.ghgif.modelMapper.GifParamMapper;
 import com.mawai.ghgif.dto.GifDTO;
+import com.mawai.ghgif.dto.GiphyDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghmbplus.model.Comment;
@@ -236,7 +238,6 @@ public class GifProcessServiceImpl implements GifProcessService {
                     .fileUrl(fileUrl)
                     .description(description)
                     .tags(tags)
-                    .fileSize((int) (file.getSize() / 1024))
                     .build();
 
             // 发送GIF消息到SQS
@@ -450,7 +451,7 @@ public class GifProcessServiceImpl implements GifProcessService {
 
             // 保存删除的文件到删除表中
             GifDelete gifDelete = new GifDelete();
-            gifDelete.setFileUrl(gif.getFileUrl());
+            gifDelete.setFileUrl(gif.getGiphyId());
             gifDelete.setFileId(fileId);
             gifDelete.setCreatedAt(LocalDateTime.now());
             gifDeleteService.save(gifDelete);
@@ -947,5 +948,37 @@ public class GifProcessServiceImpl implements GifProcessService {
         
         return gifVO;
     }
+
+    // giphy integration
+
+    /**
+     * 添加 GIF 到 what we like
+     * 发送消息到 SQS，由 GiphyMessageConsumer 异步处理
+     *
+     * @param giphyDTO GiphyDTO
+     * @param userId 用户ID
+     * @param categoryId 默认喜欢的分类ID
+     */
+    @Override
+    public void addGifToWhatWeLike(GiphyDTO giphyDTO, Long userId, Long categoryId) {
+        // 限制 source 字段长度为 256
+        if (giphyDTO.getSource() != null && giphyDTO.getSource().length() > 256) {
+            giphyDTO.setSource(giphyDTO.getSource().substring(0, 256));
+        }
+        
+        // 构建 Giphy 消息
+        GiphyMessage giphyMessage = GiphyMessage.builder()
+                .giphyDTO(giphyDTO)
+                .userId(userId)
+                .categoryId(categoryId)
+                .build();
+        
+        // 发送消息到 SQS
+        messageService.send(JSONUtil.toJsonStr(giphyMessage), SQS_QUEUE_URL, MessageType.GIPHY_MESSAGE);
+        
+        log.info("已发送 Giphy 消息到 SQS: giphyId={}, userId={}, categoryId={}",
+                giphyDTO.getGiphyId(), userId, categoryId);
+    }
+
 
 }

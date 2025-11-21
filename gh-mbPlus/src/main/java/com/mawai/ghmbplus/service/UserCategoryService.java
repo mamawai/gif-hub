@@ -20,4 +20,11 @@ public interface UserCategoryService extends IService<UserCategory> {
      * @return 是否已经有一个同名的分类
      */
     boolean existsByUserIdAndCategoryName(Long userId, String categoryName);
+
+    /**
+     * 获取用户最小的分类ID
+     * @param userId 用户ID
+     * @return 最小的分类ID，如果没有则返回null
+     */
+    Long getMinCategoryIdByUserId(Long userId);
 }

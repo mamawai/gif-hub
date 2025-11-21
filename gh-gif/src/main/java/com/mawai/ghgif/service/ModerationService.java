@@ -2,34 +2,37 @@ package com.mawai.ghgif.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mawai.ghgif.config.HttpClientConfig;
 import com.mawai.ghgif.config.OpenAiModerationProperties;
+import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 内容审核服务 - 仅使用了文本审核
  * 使用OpenAI Moderation API (omni-moderation-latest模型)
  * 通过API中转服务访问
- * 使用OkHttp实现高性能HTTP请求
+ * 使用Java HttpClient实现高性能HTTP请求
  */
 @Slf4j
 @Service
 public class ModerationService {
 
     private static final String MODERATIONS_ENDPOINT = "/moderations";
-    private static final String MEDIA_TYPE_JSON = "application/json; charset=utf-8";
     private static final double DEFAULT_THRESHOLD = 0.5;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private OkHttpClient httpClient;
+    private final HttpClient httpClient;
+    private final HttpClientConfig httpClientConfig;
 
     @Value("${openai.api.key}")
     private String apiKey;
@@ -43,9 +46,6 @@ public class ModerationService {
     @Value("${openai.moderation.model:omni-moderation-latest}")
     private String model;
 
-    @Value("${openai.moderation.timeout:3000}")
-    private int timeoutMs;
-
     @Value("${openai.moderation.fail-open:true}")
     private boolean failOpen;
 
@@ -53,25 +53,23 @@ public class ModerationService {
 
     private Map<String, Double> categoryThresholds;
 
-    public ModerationService(OpenAiModerationProperties moderationProperties) {
+    public ModerationService(HttpClient httpClient,
+                           HttpClientConfig httpClientConfig,
+                           OpenAiModerationProperties moderationProperties) {
+        this.httpClient = httpClient;
+        this.httpClientConfig = httpClientConfig;
         this.moderationProperties = moderationProperties;
     }
 
     /**
-     * 初始化OkHttpClient
+     * 初始化配置
      */
     @PostConstruct
     public void init() {
         Map<String, Double> thresholds = moderationProperties.getThresholds();
         this.categoryThresholds = thresholds != null ? new HashMap<>(thresholds) : new HashMap<>();
 
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                .build();
-        log.info("ModerationService initialized: baseUrl={}, model={}, timeout={}ms", 
-                baseUrl, model, timeoutMs);
+        log.info("ModerationService initialized: baseUrl={}, model={}", baseUrl, model);
         log.info("Custom thresholds loaded: {}", categoryThresholds);
     }
 
@@ -93,7 +91,7 @@ public class ModerationService {
             JsonNode response = sendModerationRequest(request);
             return parseModerationResponse(response);
         } catch (Exception e) {
-            return handleModerationError("文本", text, e);
+            return handleModerationError(text, e);
         }
     }
 
@@ -102,35 +100,35 @@ public class ModerationService {
      */
     private JsonNode sendModerationRequest(Map<String, Object> request) throws Exception {
         String jsonBody = objectMapper.writeValueAsString(request);
-        RequestBody body = RequestBody.create(jsonBody, okhttp3.MediaType.parse(MEDIA_TYPE_JSON));
         
-        Request httpRequest = new Request.Builder()
-                .url(baseUrl + MODERATIONS_ENDPOINT)
-                .post(body)
-                .addHeader("Authorization", "Bearer " + apiKey)
-                .addHeader("Content-Type", "application/json")
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + MODERATIONS_ENDPOINT))
+                .timeout(httpClientConfig.getRequestTimeout())
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
         
-        try (Response response = httpClient.newCall(httpRequest).execute()) {
-            if (!response.isSuccessful()) {
-                throw new ModerationException("审核API调用失败: HTTP " + response.code());
-            }
-            
-            ResponseBody responseBody = response.body();
-            if (responseBody == null) {
-                throw new ModerationException("审核API返回空响应");
-            }
-            
-            return objectMapper.readTree(responseBody.string());
+        HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() != 200) {
+            throw new ModerationException("审核API调用失败: HTTP " + response.statusCode());
         }
+        
+        String responseBody = response.body();
+        if (responseBody == null || responseBody.isEmpty()) {
+            throw new ModerationException("审核API返回空响应");
+        }
+        
+        return objectMapper.readTree(responseBody);
     }
 
     /**
      * 处理审核错误
      */
-    private ModerationResult handleModerationError(String type, String content, Exception e) {
+    private ModerationResult handleModerationError(String content, Exception e) {
         String truncated = content.length() > 50 ? content.substring(0, 50) + "..." : content;
-        log.error("{}审核失败: content='{}', error={}", type, truncated, e.getMessage());
+        log.error("{}审核失败: content='{}', error={}", "文本", truncated, e.getMessage());
         return failOpen ? ModerationResult.safe() : ModerationResult.error("审核服务暂时不可用，请稍后重试");
     }
 

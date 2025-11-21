@@ -4,11 +4,13 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghgif.dto.BatchGifUploadDTO;
 import com.mawai.ghgif.dto.GifDTO;
+import com.mawai.ghgif.dto.GiphyDTO;
 import com.mawai.ghgif.dto.LikeRequestDTO;
 import com.mawai.ghgif.exception.RateLimitException;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.ValidationService;
 import com.mawai.ghgif.vo.GifVO;
+import com.mawai.ghmbplus.service.UserCategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class GifController {
 
     private final GifProcessService gifProcessService;
     private final ValidationService validationService;
+    private final UserCategoryService userCategoryService;
 
     /**
      * 上传GIF到Cloudflare R2
@@ -293,6 +296,28 @@ public class GifController {
             return ApiResponse.success(gifVO);
         } catch (Exception e) {
             return ApiResponse.error(500, "获取GIF详情失败：" + e.getMessage());
+        }
+    }
+
+    @Operation(summary = "喜欢 GIF", description = "将 GIF 添加到 what we like")
+    @PostMapping("/weLike")
+    public ApiResponse<String> likeGiphy(@RequestBody GiphyDTO giphyDTO) {
+        try {
+            // 获取当前登录用户ID
+            Long userId = StpUtil.getLoginIdAsLong();
+            
+            // 获取用户最小的分类ID
+            Long defaultCategoryId = userCategoryService.getMinCategoryIdByUserId(userId);
+            if (defaultCategoryId == null) {
+                return ApiResponse.error(400, "用户没有喜欢分类，请先创建分类");
+            }
+            
+            // 发送消息到 SQS
+            gifProcessService.addGifToWhatWeLike(giphyDTO, userId, defaultCategoryId);
+            
+            return ApiResponse.success("GIPHY 已添加到 what we like");
+        } catch (Exception e) {
+            return ApiResponse.error(500, "添加失败：" + e.getMessage());
         }
     }
 }

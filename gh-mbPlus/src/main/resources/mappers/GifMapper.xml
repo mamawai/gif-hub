@@ -4,7 +4,8 @@
 
     <sql id="Base_Column_List">
         id, user_id, random_number, title, description,
-        file_url, status, view_count, like_count, download_count, created_at
+        giphy_id, source, giphy_username, status, view_count,
+        like_count, download_count, created_at
     </sql>
 
     <select id="selectRandom" resultType="com.mawai.ghmbplus.model.Gif">
@@ -32,8 +33,9 @@
             random_number,
             title,
             description,
-            file_url,
-            file_size,
+            giphy_id,
+            source,
+            giphy_username,
             status,
             view_count,
             like_count,
@@ -43,8 +45,9 @@
             RAND(),
             #{title},
             #{description},
-            #{fileUrl},
-            #{fileSize},
+            #{giphyId},
+            #{source},
+            #{giphyUsername},
             #{status},
             #{viewCount},
             #{likeCount},

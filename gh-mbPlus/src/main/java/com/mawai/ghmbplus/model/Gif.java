@@ -69,39 +69,25 @@ public class Gif implements Serializable {
     private String description;
 
     /**
-     * GIF文件URL
+     * GIPHY ID
      */
-    @TableField("file_url")
-    @Schema(description = "GIF文件URL")
-    private String fileUrl;
+    @TableField("giphy_id")
+    @Schema(description = "GIPHY ID")
+    private String giphyId;
 
     /**
-     * 文件大小(KB)
+     * 来源
      */
-    @TableField("file_size")
-    @Schema(description = "文件大小(KB)")
-    private Integer fileSize;
+    @TableField("source")
+    @Schema(description = "来源")
+    private String source;
 
     /**
-     * 宽度(像素)
+     * Giphy 用户名
      */
-    @TableField("width")
-    @Schema(description = "宽度(像素)")
-    private Integer width;
-
-    /**
-     * 高度(像素)
-     */
-    @TableField("height")
-    @Schema(description = "高度(像素)")
-    private Integer height;
-
-    /**
-     * 时长(毫秒)
-     */
-    @TableField("duration")
-    @Schema(description = "时长(毫秒)")
-    private Integer duration;
+    @TableField("giphy_username")
+    @Schema(description = "Giphy 用户名")
+    private String giphyUsername;
 
     /**
      * 状态：0下架，1正常

@@ -5,6 +5,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
 
 import com.mawai.ghgif.dto.GifDTO;
+import com.mawai.ghgif.dto.GiphyDTO;
 
 import java.util.List;
 
@@ -125,4 +126,14 @@ public interface GifProcessService {
      * @return GIF详情
      */
     GifVO getGifById(Long gifId);
+
+    /**
+     * 添加 GIF 到 what we like
+     * 发送消息到 SQS，由 GiphyMessageConsumer 异步处理
+     *
+     * @param giphyDTO Giphy DTO
+     * @param userId 用户ID
+     * @param categoryId 默认喜欢的分类ID
+     */
+    void addGifToWhatWeLike(GiphyDTO giphyDTO, Long userId, Long categoryId);
 }

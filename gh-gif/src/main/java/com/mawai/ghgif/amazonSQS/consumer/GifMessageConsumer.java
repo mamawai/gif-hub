@@ -164,8 +164,7 @@ public class GifMessageConsumer implements MessageConsumer {
         gif.setUserId(gifMessage.getUserId());
         gif.setTitle(StringUtils.hasText(gifMessage.getTitle()) ? gifMessage.getTitle() : gifMessage.getFileUrl());
         gif.setDescription(gifMessage.getDescription());
-        gif.setFileUrl(gifMessage.getFileUrl());
-        gif.setFileSize(gifMessage.getFileSize());
+        gif.setGiphyId(gifMessage.getFileUrl());
         gif.setStatus((byte) 1); // 默认状态为正常 -- 后续会改为审核 0
         gif.setViewCount(0);
         gif.setLikeCount(0);

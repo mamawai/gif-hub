@@ -25,5 +25,4 @@ public class GifMessage implements Serializable {
     private String fileUrl;
     private String description;
     private String tags;
-    private Integer fileSize;
 }

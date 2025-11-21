@@ -35,10 +35,10 @@ public class MessageServiceImpl implements MessageService {
     }
 
     /**
-     * @param message 发送消息
+     * @param message  发送消息
      * @param queueUrl 目标队列
      *
-     * 发送消息，失败时最多重试3次
+     *                 发送消息，失败时最多重试3次
      */
     @Override
     public void send(String message, String queueUrl, MessageType messageType) {
@@ -57,8 +57,7 @@ public class MessageServiceImpl implements MessageService {
                         MessageAttributeValue.builder()
                                 .dataType("String")
                                 .stringValue(messageType.getValue())
-                                .build()
-                );
+                                .build());
 
                 // sendMessage
                 SendMessageResponse response = sqsClient.sendMessage(
@@ -66,8 +65,7 @@ public class MessageServiceImpl implements MessageService {
                                 .messageAttributes(messageAttribute)
                                 .queueUrl(queueUrl)
                                 .messageBody(message)
-                                .build()
-                );
+                                .build());
 
                 // 检查响应是否成功
                 if (response.messageId() != null && response.md5OfMessageBody() != null) {
@@ -108,7 +106,7 @@ public class MessageServiceImpl implements MessageService {
      * 删除SQS消息
      * 
      * @param receiptHandle 消息的接收句柄，用于唯一标识要删除的消息
-     * @param queueUrl 队列URL
+     * @param queueUrl      队列URL
      * @throws RuntimeException 当删除失败时抛出异常
      */
     @Override
@@ -118,13 +116,13 @@ public class MessageServiceImpl implements MessageService {
                     .queueUrl(queueUrl)
                     .receiptHandle(receiptHandle)
                     .build();
-                    
+
             sqsClient.deleteMessage(deleteMessageRequest);
             log.info("消息删除成功, receiptHandle: {}, queueUrl: {}", receiptHandle, queueUrl);
-            
+
         } catch (Exception e) {
-            log.error("消息删除失败, receiptHandle: {}, queueUrl: {}, 错误: {}", 
-                     receiptHandle, queueUrl, e.getMessage(), e);
+            log.error("消息删除失败, receiptHandle: {}, queueUrl: {}, 错误: {}",
+                    receiptHandle, queueUrl, e.getMessage(), e);
             throw new RuntimeException("删除SQS消息失败: " + e.getMessage(), e);
         }
     }

@@ -11,27 +11,35 @@ import java.util.function.Supplier;
 /**
  * SQS 消息幂等性处理器
  *
- * <p>提供统一的幂等性校验和处理逻辑，确保消息不会被重复处理</p>
+ * <p>
+ * 提供统一的幂等性校验和处理逻辑，确保消息不会被重复处理
+ * </p>
  *
- * <p><b>核心机制：</b></p>
+ * <p>
+ * <b>核心机制：</b>
+ * </p>
  * <ul>
- *   <li>分布式锁（30秒）：防止并发重复处理</li>
- *   <li>处理记录（120秒）：记录已成功处理的消息 ID</li>
- *   <li>重试计数（120秒）：记录失败重试次数</li>
+ * <li>分布式锁（30秒）：防止并发重复处理</li>
+ * <li>处理记录（120秒）：记录已成功处理的消息 ID</li>
+ * <li>重试计数（120秒）：记录失败重试次数</li>
  * </ul>
  *
- * <p><b>Redis Key 设计：</b></p>
+ * <p>
+ * <b>Redis Key 设计：</b>
+ * </p>
  * <ul>
- *   <li>锁 Key：idp:lock:{消费者类型}:{messageId}</li>
- *   <li>处理记录 Key：idp:processed:{消费者类型}:{messageId}</li>
- *   <li>重试计数 Key：idp:retry:{消费者类型}:{messageId}</li>
+ * <li>锁 Key：idp:lock:{消费者类型}:{messageId}</li>
+ * <li>处理记录 Key：idp:processed:{消费者类型}:{messageId}</li>
+ * <li>重试计数 Key：idp:retry:{消费者类型}:{messageId}</li>
  * </ul>
  *
- * <p><b>幂等性保证：</b></p>
+ * <p>
+ * <b>幂等性保证：</b>
+ * </p>
  * <ul>
- *   <li>已处理检查：快速过滤已成功处理的消息</li>
- *   <li>分布式锁：确保同一消息同一时刻只有一个实例在处理</li>
- *   <li>标记在释放锁之前：保证获取锁成功的线程看到的状态是一致的</li>
+ * <li>已处理检查：快速过滤已成功处理的消息</li>
+ * <li>分布式锁：确保同一消息同一时刻只有一个实例在处理</li>
+ * <li>标记在释放锁之前：保证获取锁成功的线程看到的状态是一致的</li>
  * </ul>
  *
  * @author mawai
@@ -71,8 +79,8 @@ public class IdempotentHandler {
     /**
      * 执行幂等性处理
      *
-     * @param consumerType 消费者类型（如：gif、comment、commentlikes、userlikes）
-     * @param messageId SQS 消息 ID
+     * @param consumerType  消费者类型（如：gif、comment、commentlikes、userlikes）
+     * @param messageId     SQS 消息 ID
      * @param businessLogic 业务逻辑（返回 true 表示成功，false 表示失败）
      * @return 处理结果
      */
@@ -173,4 +181,3 @@ public class IdempotentHandler {
     }
 
 }
-

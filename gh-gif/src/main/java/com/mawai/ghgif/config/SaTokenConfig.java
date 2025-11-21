@@ -21,7 +21,8 @@ public class SaTokenConfig extends BaseSaTokenConfig {
             "/gif/randomGif",
             "/gif/user/**",
             "/gif/record-download",
-            "/tag/**"
+            "/tag/**",
+            "/api/giphy/**"
     );
 
     /**
