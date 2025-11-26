@@ -29,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -73,6 +74,7 @@ public class GifMessageConsumer implements MessageConsumer {
         // 解析消息（提前解析，用于异常处理）
         GifMessage gifMessage = JSONUtil.toBean(body, GifMessage.class);
 
+        AtomicReference<Long> gifId = new AtomicReference<>(-1L);
         // 使用幂等性处理器执行业务逻辑
         IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
             try {
@@ -84,6 +86,7 @@ public class GifMessageConsumer implements MessageConsumer {
                     log.error("保存GIF文件失败: gifMessage={}", gifMessage);
                     return false;
                 }
+                gifId.set(gif.getId());
                 log.info("保存GIF文件成功，ID: {}", gif.getId());
 
                 // 保存标签信息（如果存在）
@@ -113,13 +116,13 @@ public class GifMessageConsumer implements MessageConsumer {
         });
 
         // 处理幂等性结果
-        handleIdempotentResult(result, message, gifMessage);
+        handleIdempotentResult(result, message, gifMessage, gifId.get());
     }
 
     /**
      * 处理幂等性结果
      */
-    private void handleIdempotentResult(IdempotentResult result, Message message, GifMessage gifMessage) {
+    private void handleIdempotentResult(IdempotentResult result, Message message, GifMessage gifMessage, Long gifId) {
         String messageId = message.messageId();
 
         switch (result.getStatus()) {
@@ -145,7 +148,7 @@ public class GifMessageConsumer implements MessageConsumer {
                 // 重试3次后仍失败，记录删除信息（等待clearDeletedGifs删除r2文件）
                 if (idempotentHandler.isExceedMaxRetry(retryTimes)) {
                     log.error("GIF消息处理失败3次，记录删除文件，messageId: {}", messageId);
-                    SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage);
+                    SpringUtils.getAopProxy(this).handleProcessingFailure(gifMessage, gifId);
                 }
 
                 // 重新抛出异常，触发事务回滚
@@ -231,14 +234,19 @@ public class GifMessageConsumer implements MessageConsumer {
      * 使用独立事务，确保失败记录不会被主事务回滚影响
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void handleProcessingFailure(GifMessage gifMessage) {
+    public void handleProcessingFailure(GifMessage gifMessage, Long gifId) {
         if (gifMessage != null) {
             // 保存需要删除的文件到删除表中
             try {
                 if (cacheService.setIfAbsent(HANDLE_GIF_MSG_FAIL + gifMessage.getFileUrl(), "1", 1L, TimeUnit.MINUTES)) {
+                    if (gifId < 0) {
+                        log.error("文件本地保存失败无需删除，需要进行云端删除fileUrl:{}", gifMessage.getFileUrl());
+                        return;
+                    }
                     gifDeleteService.save(new GifDelete()
                             .setFileUrl(gifMessage.getFileUrl())
-                            .setCreatedAt(LocalDateTime.now()));
+                            .setCreatedAt(LocalDateTime.now())
+                            .setFileId(String.valueOf(gifId)));
                     log.info("已记录需要删除的文件: {}", gifMessage.getFileUrl());
                 }
             } catch (Exception deleteException) {
