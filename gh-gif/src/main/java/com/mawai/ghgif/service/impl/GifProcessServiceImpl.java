@@ -433,57 +433,52 @@ public class GifProcessServiceImpl implements GifProcessService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteGif(String fileId) {
-        Gif gif;
-        try {
-            // 根据fileId查询fileName
-            gif = gifService.getById(fileId);
-            if (gif == null) {
-                log.warn("GIF文件不存在: {}", fileId);
-                return false;
-            }
+        boolean success;
+        // 根据fileId查询fileName
+        Gif gif = gifService.getById(fileId);
+        if (gif == null) {
+            log.warn("GIF文件不存在: {}", fileId);
+            return false;
+        }
 
-            // 软删除fileId下的所有评论
-            boolean updated = commentService.lambdaUpdate()
-                    .eq(Comment::getGifId, Long.parseLong(fileId))
-                    .set(Comment::getStatus, 0)
-                    .update();
-            log.info("软删除GIF文件下的所有评论: {}", updated);
+        // 软删除fileId下的所有评论
+        boolean updated = commentService.lambdaUpdate()
+                .eq(Comment::getGifId, Long.parseLong(fileId))
+                .set(Comment::getStatus, 0)
+                .update();
+        log.info("软删除GIF文件下的所有评论: {}", updated);
 
-            // 保存删除的文件到删除表中
-            GifDelete gifDelete = new GifDelete();
-            gifDelete.setFileUrl(gif.getGiphyId());
-            gifDelete.setFileId(fileId);
-            gifDelete.setCreatedAt(LocalDateTime.now());
-            gifDeleteService.save(gifDelete);
+        // 保存删除的文件到删除表中
+        GifDelete gifDelete = new GifDelete();
+        gifDelete.setFileUrl(gif.getGiphyId());
+        gifDelete.setFileId(fileId);
+        gifDelete.setCreatedAt(LocalDateTime.now());
+        gifDeleteService.save(gifDelete);
 
-            // 删除GIF
-            boolean success = gifService.removeById(fileId);
-            // TODO 如果删除成功，减少GIF总数 -- 后期转移到Audit模块
-            if (success) {
-                decrementTotalGifCount(gif.getUserId());
-                Long incremented = cacheService.increment(GIF_DELETE_COUNT_KEY, 1);
-                if (incremented % DELETE_COUNT_THRESHOLD == 0) {
-                    boolean acquired = cacheService.setIfAbsent(DELETE_TASK_KEY, "1", 5, TimeUnit.MINUTES);
-                    if (acquired) {
-                        try {
-                            // 发布事件
-                            SpringUtils.context().publishEvent(
-                                    // 每次清理2倍的数量确保都清理（因为handleProcessingFailure方法也会insert）也减少调用client的次数
-                                    new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD * 2)
-                            );
-                        } finally {
-                            // 释放锁
-                            cacheService.delete(DELETE_TASK_KEY);
-                        }
+        // 删除GIF
+        success = gifService.removeById(fileId);
+        // TODO 如果删除成功，减少GIF总数 -- 后期转移到Audit模块
+        if (success) {
+            decrementTotalGifCount(gif.getUserId());
+            Long incremented = cacheService.increment(GIF_DELETE_COUNT_KEY, 1);
+            if (incremented % DELETE_COUNT_THRESHOLD == 0) {
+                boolean acquired = cacheService.setIfAbsent(DELETE_TASK_KEY, "1", 5, TimeUnit.MINUTES);
+                if (acquired) {
+                    try {
+                        // 发布事件
+                        SpringUtils.context().publishEvent(
+                                // 每次清理2倍的数量确保都清理（因为handleProcessingFailure方法也会insert）也减少调用client的次数
+                                new GifDeleteEvent().setDelCount(incremented).setBatchSize(DELETE_COUNT_THRESHOLD * 2)
+                        );
+                    } finally {
+                        // 释放锁
+                        cacheService.delete(DELETE_TASK_KEY);
                     }
                 }
             }
-
-            return success;
-        } catch (Exception e) {
-            log.error("删除GIF文件失败: {}", e.getMessage());
-            return false; // 删除失败就返回
         }
+
+        return success;
     }
     
     /**

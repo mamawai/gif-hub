@@ -21,11 +21,13 @@ import java.util.function.Consumer;
  * 批量点赞消息消费者抽象基类<br/>
  * 提取CommentLikesConsumer和UserLikesConsumer的公共逻辑
  *
+ * @param <M> Message类型（如CommentLikesMessage）
+ * @param <E> Entity类型（如CommentLike）
  * @author mawai
  * @since 2025-11-20
  */
 @Slf4j
-public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
+public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsumer {
 
     protected final MessageService messageService;
     protected final IdempotentHandler idempotentHandler;
@@ -33,7 +35,7 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
     @Value("${aws.sqs.base-queue-url}")
     protected String queueUrl;
 
-    private BatchProcessor<T> batchProcessor;
+    private BatchProcessor<M> batchProcessor;
 
     // 批量大小：20条
     private static final int BATCH_SIZE = 20;
@@ -79,7 +81,7 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
         }
 
         // 解析消息
-        T businessMessage = parseMessage(body);
+        M businessMessage = parseMessage(body);
 
         // 幂等性检查
         IdempotentResult result = idempotentHandler.execute(getConsumerType(), messageId, () -> {
@@ -95,7 +97,7 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
     /**
      * 批量处理消息
      */
-    private void processBatch(List<BatchMessageWrapper<T>> batch) {
+    private void processBatch(List<BatchMessageWrapper<M>> batch) {
         try {
             // 尝试批量处理
             SpringUtils.getAopProxy(this).batchProcess(batch);
@@ -110,14 +112,14 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
      * 批量处理（在事务中执行）
      */
     @Transactional(rollbackFor = Exception.class)
-    public void batchProcess(List<BatchMessageWrapper<T>> batch) {
+    public void batchProcess(List<BatchMessageWrapper<M>> batch) {
         log.info("开始批量处理: 消息数={}", batch.size());
 
-        List<T> allNewLikes = new ArrayList<>();
-        List<T> allDeleteLikes = new ArrayList<>();
+        List<E> allNewLikes = new ArrayList<>();
+        List<E> allDeleteLikes = new ArrayList<>();
 
-        // 收集所有新增和删除的数据
-        for (BatchMessageWrapper<T> wrapper : batch) {
+        // 收集所有新增和删除的实体
+        for (BatchMessageWrapper<M> wrapper : batch) {
             collectLikes(wrapper.getBusinessMessage(), allNewLikes, allDeleteLikes);
         }
 
@@ -135,7 +137,7 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
 
         // 事务提交后删除所有SQS消息
         registerAfterCommit(() -> {
-            for (BatchMessageWrapper<T> wrapper : batch) {
+            for (BatchMessageWrapper<M> wrapper : batch) {
                 try {
                     messageService.deleteMessage(wrapper.getSqsMessage().receiptHandle(), queueUrl);
                     log.debug("SQS消息删除成功: messageId={}", wrapper.getSqsMessage().messageId());
@@ -149,8 +151,8 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
     /**
      * 降级处理：逐条处理
      */
-    private void degradeToSingleProcess(List<BatchMessageWrapper<T>> batch) {
-        for (BatchMessageWrapper<T> wrapper : batch) {
+    private void degradeToSingleProcess(List<BatchMessageWrapper<M>> batch) {
+        for (BatchMessageWrapper<M> wrapper : batch) {
             try {
                 SpringUtils.getAopProxy(this).singleProcess(wrapper);
             } catch (Exception e) {
@@ -165,12 +167,12 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
      * 单条处理（在事务中执行）
      */
     @Transactional(rollbackFor = Exception.class)
-    public void singleProcess(BatchMessageWrapper<T> wrapper) {
-        T businessMessage = wrapper.getBusinessMessage();
+    public void singleProcess(BatchMessageWrapper<M> wrapper) {
+        M businessMessage = wrapper.getBusinessMessage();
         Message sqsMessage = wrapper.getSqsMessage();
 
-        List<T> newLikes = new ArrayList<>();
-        List<T> deleteLikes = new ArrayList<>();
+        List<E> newLikes = new ArrayList<>();
+        List<E> deleteLikes = new ArrayList<>();
         collectLikes(businessMessage, newLikes, deleteLikes);
 
         // 单条插入
@@ -197,7 +199,7 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
     /**
      * 处理幂等性结果
      */
-    private void handleIdempotentResult(IdempotentResult result, Message message, T businessMessage) {
+    private void handleIdempotentResult(IdempotentResult result, Message message, M businessMessage) {
         String messageId = message.messageId();
 
         switch (result.getStatus()) {
@@ -236,25 +238,25 @@ public abstract class AbstractBatchLikesConsumer<T> implements MessageConsumer {
     /**
      * 解析消息
      */
-    protected abstract T parseMessage(String body);
+    protected abstract M parseMessage(String body);
 
     /**
-     * 收集新增和删除的点赞数据
+     * 收集新增和删除的点赞实体
      */
-    protected abstract void collectLikes(T message, List<T> newLikes, List<T> deleteLikes);
+    protected abstract void collectLikes(M message, List<E> newLikes, List<E> deleteLikes);
 
     /**
-     * 批量插入
+     * 批量插入实体
      */
-    protected abstract int batchInsert(List<T> likes);
+    protected abstract int batchInsert(List<E> entities);
 
     /**
-     * 批量删除
+     * 批量删除实体
      */
-    protected abstract int batchDelete(List<T> likes);
+    protected abstract int batchDelete(List<E> entities);
 
     /**
      * 处理失败回滚Redis
      */
-    protected abstract void handleProcessingFailure(T message);
+    protected abstract void handleProcessingFailure(M message);
 }

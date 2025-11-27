@@ -6,6 +6,7 @@ import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.MessageService;
+import com.mawai.ghmbplus.model.UserLike;
 import com.mawai.ghmbplus.service.UserLikeService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -21,7 +22,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
-public class UserLikesConsumer extends AbstractBatchLikesConsumer<UserLikesMessage> {
+public class UserLikesConsumer extends AbstractBatchLikesConsumer<UserLikesMessage, UserLike> {
 
     private final UserLikeService userLikeService;
     private final GifProcessService gifProcessService;
@@ -48,39 +49,25 @@ public class UserLikesConsumer extends AbstractBatchLikesConsumer<UserLikesMessa
     }
 
     @Override
-    protected void collectLikes(UserLikesMessage message, List<UserLikesMessage> newLikes, List<UserLikesMessage> deleteLikes) {
+    protected void collectLikes(UserLikesMessage message, List<UserLike> newLikes, List<UserLike> deleteLikes) {
         if (message.getNewLikes() != null && !message.getNewLikes().isEmpty()) {
-            newLikes.add(message);
+            newLikes.addAll(message.getNewLikes());
         }
         if (message.getDeleteLikes() != null && !message.getDeleteLikes().isEmpty()) {
-            deleteLikes.add(message);
+            deleteLikes.addAll(message.getDeleteLikes());
         }
     }
 
     @Override
-    protected int batchInsert(List<UserLikesMessage> messages) {
-        int total = 0;
-        for (UserLikesMessage message : messages) {
-            if (message.getNewLikes() != null && !message.getNewLikes().isEmpty()) {
-                userLikeService.insertOrUpdateBatchByUniqueKey(message.getNewLikes());
-                total += message.getNewLikes().size();
-                log.debug("用户{}插入/更新{}条点赞", message.getUserId(), message.getNewLikes().size());
-            }
-        }
-        return total;
+    protected int batchInsert(List<UserLike> entities) {
+        userLikeService.insertOrUpdateBatchByUniqueKey(entities);
+        return entities.size();
     }
 
     @Override
-    protected int batchDelete(List<UserLikesMessage> messages) {
-        int total = 0;
-        for (UserLikesMessage message : messages) {
-            if (message.getDeleteLikes() != null && !message.getDeleteLikes().isEmpty()) {
-                userLikeService.batchDelete(message.getDeleteLikes());
-                total += message.getDeleteLikes().size();
-                log.debug("用户{}删除{}条点赞", message.getUserId(), message.getDeleteLikes().size());
-            }
-        }
-        return total;
+    protected int batchDelete(List<UserLike> entities) {
+        userLikeService.batchDelete(entities);
+        return entities.size();
     }
 
     @Override

@@ -7,6 +7,7 @@ import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.CommentProcessService;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
+import com.mawai.ghmbplus.model.CommentLike;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +22,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
-public class CommentLikesConsumer extends AbstractBatchLikesConsumer<CommentLikesMessage> {
+public class CommentLikesConsumer extends AbstractBatchLikesConsumer<CommentLikesMessage, CommentLike> {
 
     private final CommentLikeMapper commentLikeMapper;
     private final CommentProcessService commentProcessService;
@@ -48,39 +49,23 @@ public class CommentLikesConsumer extends AbstractBatchLikesConsumer<CommentLike
     }
 
     @Override
-    protected void collectLikes(CommentLikesMessage message, List<CommentLikesMessage> newLikes, List<CommentLikesMessage> deleteLikes) {
+    protected void collectLikes(CommentLikesMessage message, List<CommentLike> newLikes, List<CommentLike> deleteLikes) {
         if (message.getNewLikes() != null && !message.getNewLikes().isEmpty()) {
-            newLikes.add(message);
+            newLikes.addAll(message.getNewLikes());
         }
         if (message.getDeleteLikes() != null && !message.getDeleteLikes().isEmpty()) {
-            deleteLikes.add(message);
+            deleteLikes.addAll(message.getDeleteLikes());
         }
     }
 
     @Override
-    protected int batchInsert(List<CommentLikesMessage> messages) {
-        int total = 0;
-        for (CommentLikesMessage message : messages) {
-            if (message.getNewLikes() != null && !message.getNewLikes().isEmpty()) {
-                int inserted = commentLikeMapper.batchInsertIgnore(message.getNewLikes());
-                total += inserted;
-                log.debug("用户{}插入{}条评论点赞", message.getUserId(), inserted);
-            }
-        }
-        return total;
+    protected int batchInsert(List<CommentLike> entities) {
+        return commentLikeMapper.batchInsertIgnore(entities);
     }
 
     @Override
-    protected int batchDelete(List<CommentLikesMessage> messages) {
-        int total = 0;
-        for (CommentLikesMessage message : messages) {
-            if (message.getDeleteLikes() != null && !message.getDeleteLikes().isEmpty()) {
-                int deleted = commentLikeMapper.batchDelete(message.getDeleteLikes());
-                total += deleted;
-                log.debug("用户{}删除{}条评论点赞", message.getUserId(), deleted);
-            }
-        }
-        return total;
+    protected int batchDelete(List<CommentLike> entities) {
+        return commentLikeMapper.batchDelete(entities);
     }
 
     @Override
