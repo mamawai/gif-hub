@@ -63,4 +63,12 @@ public interface EmailAuthService {
      * @return 邮箱验证状态
      */
     boolean isEmailVerified();
-} 
+
+    /**
+     * 注销账号（硬删除）
+     *
+     * @param password 用户密码（用于验证）
+     * @return 是否注销成功
+     */
+    boolean deleteAccount(String password);
+}

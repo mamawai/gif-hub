@@ -155,4 +155,26 @@ public class EmailAuthController {
     public ApiResponse<Boolean> isEmailVerified() {
         return ApiResponse.success(emailAuthService.isEmailVerified());
     }
-} 
+
+    /**
+     * 注销账号
+     *
+     * @param deleteAccountDTO 注销请求
+     * @return 注销结果
+     */
+    @Operation(summary = "注销账号", description = "永久删除账号及所有相关数据，邮箱24小时内无法重新注册")
+    @PostMapping("/delete")
+    public ApiResponse<Boolean> deleteAccount(@RequestBody DeleteAccountDTO deleteAccountDTO) {
+        try {
+            boolean result = emailAuthService.deleteAccount(deleteAccountDTO.getPassword());
+            if (result) {
+                return ApiResponse.success(true);
+            } else {
+                return ApiResponse.error(500, "注销账号失败");
+            }
+        } catch (Exception e) {
+            log.error("注销账号失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, "注销账号失败: " + e.getMessage());
+        }
+    }
+}

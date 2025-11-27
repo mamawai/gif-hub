@@ -32,17 +32,17 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
         // token名称 (同时也是请求头中的key)
         config.setTokenName("satoken");
 
-        // token有效期，单位秒，默认30天，这里设置为7天
-        config.setTimeout(604800);
+        // token有效期，单位秒，默认30天
+        // config.setTimeout(604800);
 
-        // token临时有效期 (指定时间内无操作就过期)，单位秒，30分钟
-        config.setActiveTimeout(1800);
+        // token临时有效期 (指定时间内无操作就过期)，单位秒，1天
+        config.setActiveTimeout(60 * 60 * 24);
 
         // 是否允许同一账号并发登录 (false表示只能在一端登录)
-        config.setIsConcurrent(false);
+        config.setIsConcurrent(true);
 
         // 在多人登录同一账号时，是否共用一个token (false表示每次登录生成新token)
-        config.setIsShare(false);
+        config.setIsShare(true);
 
         // token风格
         config.setTokenStyle("uuid");
