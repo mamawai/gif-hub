@@ -136,4 +136,13 @@ public interface GifProcessService {
      * @param categoryId 默认喜欢的分类ID
      */
     void addGifToWhatWeLike(GiphyDTO giphyDTO, Long userId, Long categoryId);
+
+    /**
+     * 更新用户昵称
+     *
+     * @param userId 用户ID
+     * @param nickname 新昵称
+     * @return 是否更新成功
+     */
+    boolean updateUserNickname(Long userId, String nickname);
 }

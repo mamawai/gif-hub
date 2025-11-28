@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -822,7 +823,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             // 将评论ID和createdAt作为score添加到ZSet
             Map<String, Double> scoreMembers = new HashMap<>();
             for (RootCommentBO bo : rootCommentBOs) {
-                double score = bo.getCreatedAt().atZone(ZoneId.systemDefault()).toEpochSecond();
+                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
@@ -853,7 +854,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             // 将评论ID和createdAt作为score添加到ZSet
             Map<String, Double> scoreMembers = new HashMap<>();
             for (ChildCommentBO bo : childCommentBOs) {
-                double score = bo.getCreatedAt().atZone(ZoneId.systemDefault()).toEpochSecond();
+                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
@@ -1002,7 +1003,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             if (lastScore != null) {
                 // 将 score（秒级时间戳）转换为 LocalDateTime
                 cursor = LocalDateTime.ofInstant(
-                        Instant.ofEpochSecond(lastScore.longValue()),
+                        Instant.ofEpochMilli(lastScore.longValue()),
                         ZoneId.systemDefault()
                 );
             }

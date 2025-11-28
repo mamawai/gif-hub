@@ -320,4 +320,32 @@ public class GifController {
             return ApiResponse.error(500, "添加失败：" + e.getMessage());
         }
     }
+
+    /**
+     * 修改用户昵称
+     *
+     * @param nickname 新昵称
+     * @return 修改结果
+     */
+    @Operation(summary = "修改用户昵称", description = "修改当前登录用户的昵称")
+    @PutMapping("/updateNickname")
+    public ApiResponse<Boolean> updateNickname(@RequestParam("nickname") String nickname) {
+        try {
+            if (nickname == null || nickname.trim().isEmpty()) {
+                return ApiResponse.error(400, "昵称不能为空");
+            }
+            
+            if (nickname.length() > 10) {
+                return ApiResponse.error(400, "昵称长度不能超过10个字符");
+            }
+            
+            Long userId = StpUtil.getLoginIdAsLong();
+            boolean result = gifProcessService.updateUserNickname(userId, nickname.trim());
+            
+            return ApiResponse.success(result, "昵称修改成功");
+        } catch (Exception e) {
+            return ApiResponse.error(500, "修改昵称失败：" + e.getMessage());
+        }
+    }
+    
 }

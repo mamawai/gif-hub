@@ -177,21 +177,28 @@
 
     <!-- 清理软删除评论及其点赞记录 -->
     <delete id="deleteCommentsAndCommentLikes">
-        DELETE FROM comment_like
-        WHERE comment_id IN (
-            SELECT id FROM comment
-            WHERE status = 0 AND updated_at &lt; #{expireTime}
-        );
-        
-        DELETE FROM comment
-        WHERE status = 0 AND updated_at &lt; #{expireTime}
+        WITH to_delete AS (
+            SELECT id
+            FROM comment
+            WHERE status = 0
+            AND updated_at &lt; #{expireTime}
+        ),
+        del_like AS (
+            DELETE FROM comment_like cl
+            USING to_delete td
+            WHERE cl.comment_id = td.id
+            RETURNING 1
+        )
+        DELETE FROM comment c
+        USING to_delete td
+        WHERE c.id = td.id;
     </delete>
 
     <!-- 清理孤儿点赞记录（comment_id 在 comment 表中不存在） -->
     <delete id="deleteOrphanCommentLikes">
-        DELETE FROM comment_like
-        WHERE comment_id NOT IN (
-            SELECT id FROM comment
+        DELETE FROM comment_like cl
+        WHERE NOT EXISTS(
+            SELECT 1 FROM comment c WHERE c.id = cl.comment_id
         )
     </delete>
 

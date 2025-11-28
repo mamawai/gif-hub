@@ -7,5 +7,6 @@ package com.mawai.ghgif.constant;
 public enum RateLimiterType {
     UPLOAD,
     VIEW,
-    COMMENT
+    COMMENT,
+    UPDATE_NICKNAME
 }

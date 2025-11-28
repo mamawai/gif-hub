@@ -14,7 +14,6 @@ import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghgif.dto.GiphyDTO;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
-import com.mawai.ghmbplus.model.Comment;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
@@ -22,10 +21,13 @@ import com.mawai.ghgif.vo.GifVO;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.UserLike;
+import com.mawai.ghmbplus.model.Comment;
+import com.mawai.ghmbplus.model.User;
 import com.mawai.ghmbplus.service.CommentService;
 import com.mawai.ghmbplus.service.GifDeleteService;
 import com.mawai.ghmbplus.service.GifService;
 import com.mawai.ghmbplus.service.UserLikeService;
+import com.mawai.ghmbplus.service.UserService;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -76,6 +78,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final CommentService commentService;
     private final CacheService cacheService;
     private final MessageService messageService;
+    private final UserService userService;
     // 注入线程池
     private final Executor fileUploadExecutor;
     // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
@@ -976,5 +979,90 @@ public class GifProcessServiceImpl implements GifProcessService {
                 giphyDTO.getGiphyId(), userId, categoryId);
     }
 
+
+    /**
+     * 更新用户昵称
+     *
+     * <p>同步更新数据库，异步更新评论缓存中的昵称字段</p>
+     *
+     * <p><b>限流策略：</b>一周只能修改一次</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>更新 users 表的 nickname 字段</li>
+     *   <li>立即返回更新结果</li>
+     *   <li>异步查询用户所有评论ID</li>
+     *   <li>批量更新 Redis 中 comment:detail:{commentId} 的 nickname 字段</li>
+     * </ol>
+     *
+     * @param userId 用户ID
+     * @param nickname 新昵称
+     * @return 是否更新成功
+     */
+    @Override
+    @RateLimiter(permitsPerSecond = 1.0 / (7 * 24 * 60 * 60), bucketCapacity = 1, message = "昵称修改过于频繁，一周只能修改一次", type = RateLimiterType.UPDATE_NICKNAME)
+    public boolean updateUserNickname(Long userId, String nickname) {
+        boolean updated = userService.lambdaUpdate()
+                .eq(User::getId, userId)
+                .set(User::getNickname, nickname)
+                .update();
+        
+        if (updated) {
+            // 异步更新评论缓存中的昵称
+            CompletableFuture.runAsync(() -> updateCommentCacheNickname(userId, nickname), fileUploadExecutor)
+                    .exceptionally(ex -> {
+                        log.error("异步更新评论缓存昵称失败: userId={}, error={}", userId, ex.getMessage());
+                        return null;
+                    });
+        }
+        
+        return updated;
+    }
+    
+    /**
+     * 更新用户所有评论缓存中的昵称
+     */
+    private void updateCommentCacheNickname(Long userId, String nickname) {
+        try {
+            // 查询用户所有评论ID
+            List<Long> commentIds = commentService.lambdaQuery()
+                    .eq(Comment::getUserId, userId)
+                    .eq(Comment::getStatus, 1)
+                    .select(Comment::getId)
+                    .list()
+                    .stream()
+                    .map(Comment::getId)
+                    .toList();
+            
+            if (commentIds.isEmpty()) {
+                log.info("用户{}没有评论，跳过缓存更新", userId);
+                return;
+            }
+            
+            // 批量更新Redis缓存
+            int updatedCount = 0;
+            for (Long commentId : commentIds) {
+                String cacheKey = "comment:detail:" + commentId;
+                if (cacheService.hasKey(cacheKey)) {
+                    Map<String, String> hash = cacheService.hashGetAll(cacheKey);
+                    if (!hash.isEmpty()) {
+                        hash.put("nickname", nickname);
+                        Long ttl = cacheService.getExpire(cacheKey);
+                        if (ttl != null && ttl > 0) {
+                            cacheService.hashSetAll(cacheKey, hash, ttl, TimeUnit.SECONDS);
+                        } else {
+                            cacheService.hashSetAll(cacheKey, hash, 60, TimeUnit.MINUTES);
+                        }
+                        updatedCount++;
+                    }
+                }
+            }
+            
+            log.info("异步更新评论缓存昵称完成: userId={}, 总评论数={}, 更新缓存数={}",
+                    userId, commentIds.size(), updatedCount);
+        } catch (Exception e) {
+            log.error("更新评论缓存昵称失败: userId={}, error={}", userId, e.getMessage(), e);
+        }
+    }
 
 }
