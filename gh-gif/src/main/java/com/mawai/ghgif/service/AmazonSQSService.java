@@ -27,7 +27,7 @@ public class AmazonSQSService implements SmartLifecycle {
 
     private final AmazonSQSClientConfig amazonSQSClientConfig;
     private SqsClient sqsClient;
-    private volatile boolean running = true; // 启动前若为true，则sqs关闭
+    private volatile boolean running = false; // 启动前若为true，则sqs关闭
     private final List<MessageConsumer> messageConsumers;
     private List<CustomSQSMessageConsumer> sqsMessageConsumerList = new ArrayList<>();
     
