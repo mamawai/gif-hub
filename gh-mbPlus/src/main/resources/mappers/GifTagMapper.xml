@@ -46,7 +46,7 @@
             AND g.status = 1
         </where>
         ORDER BY g.like_count DESC, gt0.gif_id DESC
-        LIMIT #{offset}, #{pageSize}
+        LIMIT #{pageSize} OFFSET #{offset}
     </select>
 
 </mapper>

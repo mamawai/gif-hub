@@ -2,6 +2,7 @@ package com.mawai.ghweixin.config;
 
 import com.mawai.ghcommon.config.BaseSaTokenConfig;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -13,6 +14,10 @@ import java.util.List;
  */
 @Configuration
 public class SaTokenConfig extends BaseSaTokenConfig {
+
+    public SaTokenConfig(StringRedisTemplate stringRedisTemplate) {
+        super(stringRedisTemplate);
+    }
 
     /**
      * 微信模块特有的排除路径

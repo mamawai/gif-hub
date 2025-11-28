@@ -42,7 +42,7 @@
             download_count
         ) VALUES (
             #{userId},
-            RAND(),
+            RANDOM(),
             #{title},
             #{description},
             #{giphyId},

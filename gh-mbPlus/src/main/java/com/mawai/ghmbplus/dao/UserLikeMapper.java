@@ -20,7 +20,7 @@ public interface UserLikeMapper extends BaseMapper<UserLike> {
 
     /**
      * 批量基于唯一键的插入或更新操作
-     * 使用 MySQL 的 ON DUPLICATE KEY UPDATE 语法
+     * 使用 PG 的 ON CONFLICT DO UPDATE
      * 当 (user_id, gif_id) 已存在时更新 user_like_category_id，否则插入新记录
      * 
      * @param userLikes 用户点赞记录列表

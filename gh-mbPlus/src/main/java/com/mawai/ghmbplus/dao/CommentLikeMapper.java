@@ -37,7 +37,7 @@ public interface CommentLikeMapper extends BaseMapper<CommentLike> {
 
     /**
      * 批量插入评论点赞记录（使用唯一键去重）
-     * 使用 MySQL 的 INSERT IGNORE 语法，如果记录已存在则忽略
+     * 使用 PG 的 ON CONFLICT (user_id, comment_id) DO NOTHING 语法，如果记录已存在则忽略
      * 利用 uk_user_comment(user_id, comment_id) 唯一索引
      * 
      * @param commentLikes 评论点赞记录列表

@@ -1,5 +1,6 @@
 package com.mawai.ghweixin.controller;
 
+import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.service.EmailAuthService;
@@ -82,13 +83,13 @@ public class EmailAuthController {
             if (loginDTO.getLoginType() == 1) {
                 // 密码登录
                 result = emailAuthService.loginByPassword(
-                        loginDTO.getEmail(), 
+                        loginDTO.getEmail(),
                         loginDTO.getPassword()
                 );
             } else if (loginDTO.getLoginType() == 2) {
                 // 验证码登录/注册
                 result = emailAuthService.loginByCode(
-                        loginDTO.getEmail(), 
+                        loginDTO.getEmail(),
                         loginDTO.getVerificationCode()
                 );
             } else {
@@ -96,6 +97,9 @@ public class EmailAuthController {
             }
             
             return ApiResponse.success(result);
+        } catch (NotLoginException e) {
+            // 让NotLoginException传播到GlobalExceptionHandler
+            throw e;
         } catch (Exception e) {
             log.error("登录失败: {}", e.getMessage(), e);
             if (e.getMessage().equals("请先注册邮箱")) {

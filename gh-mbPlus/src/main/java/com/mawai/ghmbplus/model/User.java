@@ -25,7 +25,7 @@ import lombok.experimental.Accessors;
 @Getter
 @Setter
 @ToString
-@TableName("user")
+@TableName("users") // PG user重复
 @Accessors(chain = true)
 @Schema(name = "User", description = "用户表")
 public class User implements Serializable {

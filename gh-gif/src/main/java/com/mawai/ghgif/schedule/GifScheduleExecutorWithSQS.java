@@ -9,35 +9,21 @@ import com.mawai.ghgif.amazonSQS.consumer.UserLikesConsumer;
 import com.mawai.ghgif.amazonSQS.message.CommentLikesMessage;
 import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.MessageService;
-import com.mawai.ghgif.util.R2FileUtils;
 import com.mawai.ghmbplus.dao.CommentMapper;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.*;
-import com.mawai.ghmbplus.service.*;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.Delete;
-import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
-import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
-import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 /**
  * Gif定时任务执行器
@@ -50,11 +36,8 @@ public class GifScheduleExecutorWithSQS {
     private final CacheService cacheService;
     private final GifMapper gifMapper;
     private final CommentMapper commentMapper;
-    private final GifDeleteService gifDeleteService;
-    private final GifDeleteFailedService gifDeleteFailedService;
     private final MessageService messageService;
     private final TagMapper tagMapper;
-    private final GifTagService gifTagService;
 
     // 注入线程池
     private final Executor scheduledExecutor;
@@ -64,7 +47,6 @@ public class GifScheduleExecutorWithSQS {
     // 避免在用户数量过多时创建过多虚拟线程导致内存溢出
     private static final int DATA_FETCH_CONCURRENCY_LIMIT = 300;
     private final Semaphore dataFetchSemaphore = new Semaphore(DATA_FETCH_CONCURRENCY_LIMIT);
-    private final R2FileUtils r2FileUtils;
 
     private static final int SYNC_INTERVAL = 1; // 同步间隔
 
@@ -87,7 +69,7 @@ public class GifScheduleExecutorWithSQS {
     private Integer SCAN_COUNT;
 
     /**
-     * 定时同步 Redis 增量数据到 MySQL
+     * 定时同步 Redis 增量数据到 PG
      *
      * <p>
      * 每分钟执行一次，将 Redis 中累积的增量统计数据批量同步到数据库。
@@ -107,7 +89,7 @@ public class GifScheduleExecutorWithSQS {
      * </ul>
      *
      * <p>
-     * <b>设计理念：</b>高频操作写 Redis（快），定时批量同步到 MySQL（减压）
+     * <b>设计理念：</b>高频操作写 Redis（快），定时批量同步到 PG（减压）
      * </p>
      *
      * @see #syncDownloadCountToDatabase()
@@ -481,191 +463,12 @@ public class GifScheduleExecutorWithSQS {
             cacheService.replaceHotTags(args, HOT_TAG_KEY);
 
             // 删除使用次数为0的Tag数据 -- 删除gif时会删除gifTag，这里删除Tag先不删除gifTag
+            // PostgreSQL 使用 ctid 实现 LIMIT 删除
             LambdaQueryWrapper<Tag> queryWrapper = new LambdaQueryWrapper<>();
-            tagMapper.delete(queryWrapper.eq(Tag::getUseCount, 0).last("limit 200")); // limit 防止大量数据回表
+            tagMapper.delete(queryWrapper.apply("ctid IN (SELECT ctid FROM tag WHERE use_count = 0 LIMIT 200)"));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * 清理已删除的 GIF 文件（事件监听）
-     *
-     * <p>
-     * 监听 {@link GifDeleteEvent} 事件，批量删除 R2 存储上的垃圾文件，
-     * 并清理数据库中的删除记录。
-     * </p>
-     *
-     * <p>
-     * <b>处理流程：</b>
-     * </p>
-     * <ol>
-     * <li>从 gif_delete 表获取待删除记录</li>
-     * <li>批量删除 R2 存储上的文件（使用 S3 批量删除 API）</li>
-     * <li>更新 tag 表的使用次数，删除 gif_tag 关联</li>
-     * <li>删除成功的记录从 gif_delete 表移除</li>
-     * <li>删除失败的记录保存到 gif_delete_failed 表，等待人工处理</li>
-     * </ol>
-     *
-     * <p>
-     * <b>注意：</b>不加 try-catch，让事务回滚机制生效
-     * </p>
-     *
-     * @param event GIF 删除事件，包含删除数量和批次大小
-     */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Async("taskExecutor")
-    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
-    public void clearDeletedGifs(GifDeleteEvent event) {
-        log.info("开始清理删除记录表中的数据和R2垃圾文件...总删除数量为:{}", event.getDelCount());
-
-        // 调用服务层方法获取需要删除的记录（不会从数据库中删除）
-        List<GifDelete> deleteRecords = gifDeleteService.getDeleteRecords(event.getBatchSize());
-
-        if (deleteRecords.isEmpty()) {
-            log.info("没有需要清理的删除记录");
-            return;
-        }
-
-        log.info("获取到{}条需要从R2删除的文件记录", deleteRecords.size());
-
-        // 获取S3Client
-        S3Client s3Client = r2FileUtils.getS3Client();
-
-        // 准备批量删除对象
-        List<ObjectIdentifier> objectsToDelete = new ArrayList<>();
-        List<String> gifTagsToDelete = new ArrayList<>();
-        int failUrls = 0;
-
-        // 收集要删除的对象标识符
-        for (GifDelete gifDelete : deleteRecords) {
-            String fileUrl = gifDelete.getFileUrl();
-            String objectKey = extractObjectKeyFromUrl(fileUrl);
-
-            if (objectKey != null) {
-                objectsToDelete.add(
-                        ObjectIdentifier.builder()
-                                .key(objectKey)
-                                .build());
-            } else {
-                failUrls++;
-                log.error("无法从URL提取对象键: {}", fileUrl);
-            }
-
-            // 收集要删除的gifTag关联
-            if (gifDelete.getFileId() != null)
-                gifTagsToDelete.add(gifDelete.getFileId());
-        }
-
-        if (objectsToDelete.isEmpty()) {
-            log.info("没有有效的对象需要删除");
-            return;
-        }
-
-        // 执行批量删除
-        DeleteObjectsResponse deleteResponse = s3Client.deleteObjects(
-                // 创建批量删除请求
-                DeleteObjectsRequest.builder()
-                        .bucket(R2FileUtils.BUCKET_NAME)
-                        .delete(
-                                Delete.builder()
-                                        .objects(objectsToDelete)
-                                        .quiet(true) // 安静模式，只返回删除失败的对象
-                                        .build())
-                        .build());
-
-        // 处理删除结果
-        Set<String> failedKeys = new HashSet<>();
-
-        // 如果有错误，收集失败的key
-        if (deleteResponse.hasErrors() && !deleteResponse.errors().isEmpty()) {
-            deleteResponse.errors().forEach(
-                    error -> {
-                        failedKeys.add("https://mynnmy.top/" + error.key());
-                        log.error("删除对象失败: 键={}, 错误码={}, 消息={}",
-                                error.key(), error.code(), error.message());
-                    });
-        }
-
-        // 更新tag表和gifTag表
-        if (gifTagsToDelete.isEmpty()) {
-            log.info("没有有效的gifTag需要删除");
-        } else {
-            List<GifTag> gifTags = gifTagService
-                    .list(new LambdaQueryWrapper<GifTag>().in(GifTag::getGifId, gifTagsToDelete));
-            if (!gifTags.isEmpty()) {
-                Map<Long, Long> tagIdCountMap = gifTags.stream()
-                        .collect(Collectors.groupingBy(GifTag::getTagId, Collectors.counting()));
-                // 删除gifTag关联
-                gifTagService.remove(new LambdaQueryWrapper<GifTag>().in(GifTag::getGifId, gifTagsToDelete));
-                // 更新tag表
-                tagMapper.updateUseCountByMap(tagIdCountMap);
-            }
-        }
-
-        // 记录删除结果
-        log.info("成功从R2批量删除了{}个文件，失败{}个", deleteRecords.size() - failedKeys.size(), failedKeys.size());
-        // 记录无法解析URL的情况
-        if (failUrls > 0) {
-            log.warn("有{}个URL无法解析为对象键", failUrls);
-        }
-
-        List<Long> successIds = deleteRecords.stream()
-                .filter(record -> !failedKeys.contains(record.getFileUrl()))
-                .map(GifDelete::getId).toList();
-
-        // 只有在成功删除了R2文件后，才从数据库中删除记录
-        if (!successIds.isEmpty()) {
-            boolean dbDeleteSuccess = gifDeleteService.removeDeleteRecords(successIds);
-            if (dbDeleteSuccess) {
-                log.info("成功从数据库中删除了{}条记录", successIds.size());
-            } else {
-                log.error("从数据库中删除记录失败");
-            }
-        }
-
-        // 将failedKeys记录存到新表 --- 后续人工排查
-        if (!failedKeys.isEmpty()) {
-            gifDeleteFailedService.saveBatch(
-                    failedKeys.stream()
-                            .map(key -> new GifDeleteFailed()
-                                    .setFileUrl("https://mynnmy.top/" + key)
-                                    .setCreatedAt(LocalDateTime.now()))
-                            .toList());
-        }
-    }
-
-    /**
-     * 从 URL 中提取 S3 对象键
-     *
-     * <p>
-     * 从完整的 CDN URL 中提取对象存储的键名。
-     * </p>
-     *
-     * <p>
-     * <b>示例：</b>
-     * </p>
-     * 
-     * <pre>
-     * 输入：<a href="">https://mynnmy.top/gifs/01/123/abc.gif</a>
-     * 输出：gifs/01/123/abc.gif
-     * </pre>
-     *
-     * <p>
-     * <b>性能优化：</b>使用固定长度截取（19 字符），
-     * 比 split 方式快 10 倍（10000 次：0.5ms vs 6ms）
-     * </p>
-     *
-     * @param url 文件 URL
-     * @return S3 对象键，如果 URL 为空则返回 null
-     */
-    private String extractObjectKeyFromUrl(String url) {
-        if (url == null || url.isEmpty()) {
-            return null;
-        }
-        // 使用固定前缀截取，效率更高 10000次 0.5ms 而 split再取parts[3] 6ms
-        // 这里写死固定长度截取 -- https://mynnmy.top/
-        return url.substring(19);
     }
 
     /**

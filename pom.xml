@@ -36,7 +36,7 @@
         <druid.version>1.2.14</druid.version>
         <mybatis-plus.version>3.5.10</mybatis-plus.version>
         <velocity.version>2.3</velocity.version>
-        <mysql-connector.version>8.0.29</mysql-connector.version>
+<!--        <mysql-connector.version>8.0.29</mysql-connector.version>-->
         <postgresql.version>42.7.3</postgresql.version>
         <spring-boot.version>3.4.1</spring-boot.version>
         <gh.version>0.0.1-SNAPSHOT</gh.version>
@@ -97,12 +97,12 @@
             </dependency>
 
 
-            <!--Mysql数据库驱动-->
-            <dependency>
-                <groupId>mysql</groupId>
-                <artifactId>mysql-connector-java</artifactId>
-                <version>${mysql-connector.version}</version>
-            </dependency>
+<!--            &lt;!&ndash;Mysql数据库驱动&ndash;&gt;-->
+<!--            <dependency>-->
+<!--                <groupId>mysql</groupId>-->
+<!--                <artifactId>mysql-connector-java</artifactId>-->
+<!--                <version>${mysql-connector.version}</version>-->
+<!--            </dependency>-->
 
             <!--PostgreSQL数据库驱动-->
             <dependency>

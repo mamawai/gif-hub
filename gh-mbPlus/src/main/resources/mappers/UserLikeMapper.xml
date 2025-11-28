@@ -9,7 +9,7 @@
         <foreach collection="list" item="item" separator=",">
             (#{item.userId}, #{item.gifId}, #{item.userLikeCategoryId})
         </foreach>
-        ON DUPLICATE KEY UPDATE user_like_category_id = VALUES(user_like_category_id)
+        ON CONFLICT (user_id, gif_id) DO UPDATE SET user_like_category_id = EXCLUDED.user_like_category_id
     </insert>
 
     <!-- 判断用户是否点赞了某个GIF -->

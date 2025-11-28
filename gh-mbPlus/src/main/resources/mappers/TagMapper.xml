@@ -5,8 +5,8 @@
     <insert id="insertOrUpdateTag" parameterType="com.mawai.ghmbplus.model.Tag">
         INSERT INTO tag (name, use_count)
         VALUES (#{name}, 1)
-        ON DUPLICATE KEY UPDATE
-            use_count = use_count + 1
+        ON CONFLICT (name) DO UPDATE SET
+            use_count = tag.use_count + 1
     </insert>
 
     <update id="updateUseCountByMap" parameterType="java.util.Map">
@@ -27,7 +27,7 @@
     </select>
 
     <select id="selectHotTags" resultType="com.mawai.ghmbplus.model.Tag">
-        select name, use_count from tag force index (idx_use_count) order by use_count desc limit 20
+        select name, use_count from tag order by use_count desc limit 20
     </select>
 
     <select id="selectIdsByNames" resultType="java.lang.Long">

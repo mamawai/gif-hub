@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * Sa-Token配置类 - GIF模块
@@ -14,6 +15,10 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 public class SaTokenConfig extends BaseSaTokenConfig {
+
+    public SaTokenConfig(StringRedisTemplate stringRedisTemplate) {
+        super(stringRedisTemplate);
+    }
 
 
     private final List<String> GIF_EXCLUDE_PATHS = Arrays.asList(

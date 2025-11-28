@@ -29,7 +29,7 @@
             u.nickname,
             u.avatar
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
+        INNER JOIN users u ON c.user_id = u.id
         WHERE c.gif_id = #{gifId}
           AND c.root_comment_id IS NULL
           AND c.status = 1
@@ -70,8 +70,8 @@
             u.avatar,
             pu.nickname AS parent_nickname
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
-        LEFT JOIN user pu ON c.parent_user_id = pu.id
+        INNER JOIN users u ON c.user_id = u.id
+        LEFT JOIN users pu ON c.parent_user_id = pu.id
         WHERE c.root_comment_id = #{rootCommentId}
           AND c.status = 1
         <if test="cursor != null">
@@ -93,7 +93,7 @@
             u.nickname,
             u.avatar
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
+        INNER JOIN users u ON c.user_id = u.id
         WHERE c.id IN
         <foreach collection="commentIds" item="id" open="(" separator="," close=")">
             #{id}
@@ -117,8 +117,8 @@
             u.avatar,
             pu.nickname AS parent_nickname
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
-        LEFT JOIN user pu ON c.parent_user_id = pu.id
+        INNER JOIN users u ON c.user_id = u.id
+        LEFT JOIN users pu ON c.parent_user_id = pu.id
         WHERE c.id IN
         <foreach collection="commentIds" item="id" open="(" separator="," close=")">
             #{id}
@@ -146,7 +146,7 @@
             u.nickname,
             u.avatar
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
+        INNER JOIN users u ON c.user_id = u.id
         WHERE c.gif_id = #{gifId}
           AND c.root_comment_id IS NULL
           AND c.status = 1
@@ -167,7 +167,7 @@
             u.nickname,
             u.avatar
         FROM comment c
-        INNER JOIN user u ON c.user_id = u.id
+        INNER JOIN users u ON c.user_id = u.id
         WHERE c.id IN
         <foreach collection="commentIds" item="id" open="(" separator="," close=")">
             #{id}
@@ -177,17 +177,22 @@
 
     <!-- 清理软删除评论及其点赞记录 -->
     <delete id="deleteCommentsAndCommentLikes">
-        DELETE c, cl FROM comment c
-        LEFT JOIN comment_like cl ON c.id = cl.comment_id
-        WHERE c.status = 0
-          AND c.updated_at &lt; #{expireTime}
+        DELETE FROM comment_like
+        WHERE comment_id IN (
+            SELECT id FROM comment
+            WHERE status = 0 AND updated_at &lt; #{expireTime}
+        );
+        
+        DELETE FROM comment
+        WHERE status = 0 AND updated_at &lt; #{expireTime}
     </delete>
 
     <!-- 清理孤儿点赞记录（comment_id 在 comment 表中不存在） -->
     <delete id="deleteOrphanCommentLikes">
-        DELETE cl FROM comment_like cl
-        LEFT JOIN comment c ON cl.comment_id = c.id
-        WHERE c.id IS NULL
+        DELETE FROM comment_like
+        WHERE comment_id NOT IN (
+            SELECT id FROM comment
+        )
     </delete>
 
 </mapper>

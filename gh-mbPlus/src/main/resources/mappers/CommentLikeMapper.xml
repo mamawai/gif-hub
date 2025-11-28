@@ -25,11 +25,12 @@
 
     <!-- 批量插入评论点赞记录（忽略重复） -->
     <insert id="batchInsertIgnore" parameterType="java.util.List">
-        INSERT IGNORE INTO comment_like (user_id, comment_id)
+        INSERT INTO comment_like (user_id, comment_id)
         VALUES
         <foreach collection="list" item="item" separator=",">
             (#{item.userId}, #{item.commentId})
         </foreach>
+        ON CONFLICT (user_id, comment_id) DO NOTHING
     </insert>
 
     <!-- 批量删除评论点赞记录 -->
