@@ -75,6 +75,7 @@ public class GifAuditServiceImpl implements GifAuditService {
             // 拒绝
             gif.setStatus((byte) 0); // 下架状态
         }
+        gif.setUpdatedAt(LocalDateTime.now());
         
         int result = gifMapper.updateById(gif);
 

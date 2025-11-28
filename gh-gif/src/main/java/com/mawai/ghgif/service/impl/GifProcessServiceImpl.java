@@ -445,6 +445,7 @@ public class GifProcessServiceImpl implements GifProcessService {
         boolean updated = commentService.lambdaUpdate()
                 .eq(Comment::getGifId, Long.parseLong(fileId))
                 .set(Comment::getStatus, 0)
+                .set(Comment::getUpdatedAt, LocalDateTime.now())
                 .update();
         log.info("软删除GIF文件下的所有评论: {}", updated);
 

@@ -384,6 +384,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             commentService.lambdaUpdate()
                 .eq(Comment::getRootCommentId, commentIdLong)
                 .set(Comment::getStatus, 0)
+                .set(Comment::getUpdatedAt, LocalDateTime.now())
                 .update();
             
             log.info("根评论{}被删除，级联软删除了所有子评论", commentId);
@@ -391,6 +392,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         // 软删除当前评论
         comment.setStatus((byte) 0);
+        comment.setUpdatedAt(LocalDateTime.now());
         boolean result = commentService.updateById(comment);
         
         if (result) {
