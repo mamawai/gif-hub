@@ -113,7 +113,7 @@ public class CommentDetailCacheBO {
         hash.put("userId", String.valueOf(userId));
         hash.put("content", content != null ? content : "");
         hash.put("likeCount", String.valueOf(likeCount != null ? likeCount : 0L));
-        hash.put("createdAt", String.valueOf(createdAt.atZone(ZoneOffset.UTC).toInstant().toEpochMilli()));
+        hash.put("createdAt", String.valueOf(createdAt.atZone(ZoneOffset.UTC).toEpochSecond()));
         hash.put("nickname", nickname != null ? nickname : "");
         hash.put("avatar", avatar != null ? avatar : "");
         
@@ -149,7 +149,7 @@ public class CommentDetailCacheBO {
         // 时间戳转换（毫秒）
         Long timestamp = parseLong(hash.get("createdAt"));
         if (timestamp != null) {
-            bo.setCreatedAt(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneOffset.UTC));
+            bo.setCreatedAt(LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC));
         }
         
         bo.setNickname(hash.get("nickname"));

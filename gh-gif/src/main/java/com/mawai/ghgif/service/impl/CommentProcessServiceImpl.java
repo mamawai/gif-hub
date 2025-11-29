@@ -823,7 +823,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             // 将评论ID和createdAt作为score添加到ZSet
             Map<String, Double> scoreMembers = new HashMap<>();
             for (RootCommentBO bo : rootCommentBOs) {
-                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toEpochSecond();
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
@@ -854,7 +854,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             // 将评论ID和createdAt作为score添加到ZSet
             Map<String, Double> scoreMembers = new HashMap<>();
             for (ChildCommentBO bo : childCommentBOs) {
-                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toInstant().toEpochMilli();
+                double score = bo.getCreatedAt().atZone(ZoneOffset.UTC).toEpochSecond();
                 scoreMembers.put(String.valueOf(bo.getId()), score);
             }
             
@@ -988,6 +988,8 @@ public class CommentProcessServiceImpl implements CommentProcessService {
 
     /**
      * 获取cursor
+     * 注意：这里时间的转换，如果用pg需要设置时间timestamp(0)这里用秒判断才准，md，用毫秒889转换的时候给我四舍五入转换成890
+     *
      * @param cursor 游标
      * @param commentIdsFromCache 缓存数据
      * @return cursor
@@ -1003,8 +1005,8 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             if (lastScore != null) {
                 // 将 score（秒级时间戳）转换为 LocalDateTime
                 cursor = LocalDateTime.ofInstant(
-                        Instant.ofEpochMilli(lastScore.longValue()),
-                        ZoneId.systemDefault()
+                        Instant.ofEpochSecond(lastScore.longValue()),
+                        ZoneOffset.UTC
                 );
             }
         }
