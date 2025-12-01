@@ -18,6 +18,7 @@ public class CommentVO {
     private String avatar;              // 用户头像
     private String parentId;            // 父评论ID
     private String rootCommentId;       // 根评论ID
+    private Long parentUserId;        // 被回复者ID（仅子评论有）
     private String parentNickname;      // 被回复者昵称（仅子评论有）
     private String content;             // 评论内容
     private Long likeCount;             // 点赞数（合并Redis增量）

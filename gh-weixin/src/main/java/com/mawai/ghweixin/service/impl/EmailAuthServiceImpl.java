@@ -3,6 +3,7 @@ package com.mawai.ghweixin.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.mawai.ghcommon.service.CacheService;
+import com.mawai.ghcommon.service.UserNicknameCacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghmbplus.dao.UserCategoryMapper;
 import com.mawai.ghmbplus.dao.UserMapper;
@@ -35,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 public class EmailAuthServiceImpl implements EmailAuthService {
 
     private final CacheService cacheService;
+    private final UserNicknameCacheService userNicknameCacheService;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final EmailStrategy emailStrategy;
@@ -218,6 +220,9 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             user.setStatus((byte) 1);  // 正常状态
             user.setUpdatedAt(LocalDateTime.now());
             userMapper.updateById(user);
+
+            // 写入昵称缓存
+            userNicknameCacheService.updateNickname(userId, nickname);
 
             // 创建默认分类
             userCategoryMapper.insert(new UserCategory().setUserId(userId).setCategoryName("默认"));

@@ -2,7 +2,7 @@ package com.mawai.ghweixin.listener;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.mawai.ghcommon.service.CacheService;
+import com.mawai.ghcommon.service.UserNicknameCacheService;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.UserMapper;
 import com.mawai.ghmbplus.model.Comment;
@@ -22,10 +22,6 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -37,7 +33,7 @@ public class AccountDeleteEventListener {
     private final CommentLikeMapper commentLikeMapper;
     private final UserCategoryService userCategoryService;
     private final UserMapper userMapper;
-    private final CacheService cacheService;
+    private final UserNicknameCacheService userNicknameCacheService;
 
     @Async("taskExecutor")
     @EventListener
@@ -55,34 +51,18 @@ public class AccountDeleteEventListener {
             log.info("删除用户GIF: userId={}, count={}", userId, gifCount);
         }
         
-        // 删除用户评论 - 先查询所有评论ID
-        List<Comment> userComments = commentService.lambdaQuery().select(Comment::getId).eq(Comment::getUserId, userId).list();
-        int commentCount = userComments.size();
+        // 删除用户评论
+        int commentCount = commentService.lambdaQuery().eq(Comment::getUserId, userId).count().intValue();
         if (commentCount > 0) {
-            // 删除评论前收集所有评论ID
-            List<Long> commentIds = userComments.stream().map(Comment::getId).toList();
-            
-            // 删除评论
             commentService.lambdaUpdate().eq(Comment::getUserId, userId).remove();
             log.info("删除用户评论: userId={}, count={}", userId, commentCount);
-            
-            // 更新Redis缓存中的评论detail
-            for (Long commentId : commentIds) {
-                String cacheKey = "comment:detail:" + commentId;
-                Map<String, String> commentDetail = cacheService.hashGetAll(cacheKey);
-                if (!commentDetail.isEmpty()) {
-                    commentDetail.put("nickname", "用户已注销");
-                    commentDetail.put("content", "用户已注销内容无法查看");
-                    // 获取原来的过期时间
-                    Long ttl = cacheService.getExpire(cacheKey);
-                    if (ttl != null && ttl > 0) {
-                        cacheService.hashSetAll(cacheKey, commentDetail, ttl, TimeUnit.SECONDS);
-                    } else {
-                        cacheService.hashSetAll(cacheKey, commentDetail, 1, TimeUnit.DAYS);
-                    }
-                    log.info("更新评论缓存: commentId={}", commentId);
-                }
-            }
+        }
+        
+        // 删除用户昵称缓存
+        if (userNicknameCacheService.deleteNickname(userId)) {
+            log.info("删除用户昵称缓存: userId={}", userId);
+        } else {
+            log.warn("删除用户昵称缓存失败: userId={}", userId);
         }
         
         // 删除用户GIF点赞

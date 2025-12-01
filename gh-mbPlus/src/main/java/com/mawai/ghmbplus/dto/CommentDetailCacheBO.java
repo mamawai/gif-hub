@@ -12,7 +12,7 @@ import java.util.Map;
  * 评论详情缓存对象（用于 Redis Hash 统一存储）
  * 
  * <p>整合了根评论和子评论的所有字段，使用 Redis Hash 结构存储</p>
- * <p>根评论：parentId、rootCommentId、parentUserId、parentNickname 为 null</p>
+ * <p>根评论：parentId、rootCommentId、parentUserId 为 null</p>
  * <p>子评论：所有字段都有值</p>
  * 
  * <p>Redis 结构：</p>
@@ -24,12 +24,10 @@ import java.util.Map;
  *   - content: "很棒的评论"
  *   - likeCount: "10"
  *   - createdAt: "1730275200"  (Unix timestamp)
- *   - nickname: "张三"
  *   - avatar: "https://..."
  *   - parentId: ""  (根评论为空字符串)
  *   - parentUserId: ""
  *   - rootCommentId: ""
- *   - parentNickname: ""
  * </pre>
  * 
  * @author mawai
@@ -45,50 +43,47 @@ public class CommentDetailCacheBO {
     private String content;
     private Long likeCount;  // ← 重点：定时任务会使用 HINCRBY 直接更新此字段
     private LocalDateTime createdAt;
-    private String nickname;
     private String avatar;
     
     // ========== 子评论特有字段（根评论时为 null） ==========
     private Long parentId;
     private Long parentUserId;
     private Long rootCommentId;
-    private String parentNickname;
     
     /**
      * 从 RootCommentBO 转换为缓存对象
      */
     public static CommentDetailCacheBO fromRoot(RootCommentBO root) {
-        CommentDetailCacheBO cache = new CommentDetailCacheBO();
-        cache.setId(root.getId());
-        cache.setGifId(root.getGifId());
-        cache.setUserId(root.getUserId());
-        cache.setContent(root.getContent());
-        cache.setLikeCount(root.getLikeCount());
-        cache.setCreatedAt(root.getCreatedAt());
-        cache.setNickname(root.getNickname());
-        cache.setAvatar(root.getAvatar());
         // 子评论字段保持 null
-        return cache;
+        return baseBoCacheBuild(root.getId(), root.getGifId(), root.getUserId(), root.getContent(),
+                root.getLikeCount(), root.getCreatedAt(), root.getAvatar());
     }
-    
+
     /**
      * 从 ChildCommentBO 转换为缓存对象
      */
     public static CommentDetailCacheBO fromChild(ChildCommentBO child) {
-        CommentDetailCacheBO cache = new CommentDetailCacheBO();
-        cache.setId(child.getId());
-        cache.setGifId(child.getGifId());
-        cache.setUserId(child.getUserId());
-        cache.setContent(child.getContent());
-        cache.setLikeCount(child.getLikeCount());
-        cache.setCreatedAt(child.getCreatedAt());
-        cache.setNickname(child.getNickname());
-        cache.setAvatar(child.getAvatar());
+        CommentDetailCacheBO cacheBO = baseBoCacheBuild(child.getId(), child.getGifId(), child.getUserId(), child.getContent(),
+                child.getLikeCount(), child.getCreatedAt(), child.getAvatar());
         // 子评论特有字段
-        cache.setParentId(child.getParentId());
-        cache.setParentUserId(child.getParentUserId());
-        cache.setRootCommentId(child.getRootCommentId());
-        cache.setParentNickname(child.getParentNickname());
+        cacheBO.setParentId(child.getParentId());
+        cacheBO.setParentUserId(child.getParentUserId());
+        cacheBO.setRootCommentId(child.getRootCommentId());
+        return cacheBO;
+    }
+
+    /**
+     * 构建 CommentDetailCacheBO 的基本字段（根评论和子评论都通用）
+     */
+    private static CommentDetailCacheBO baseBoCacheBuild(Long id, Long gifId, Long userId, String content, Long likeCount, LocalDateTime createdAt, String avatar) {
+        CommentDetailCacheBO cache = new CommentDetailCacheBO();
+        cache.setId(id);
+        cache.setGifId(gifId);
+        cache.setUserId(userId);
+        cache.setContent(content);
+        cache.setLikeCount(likeCount);
+        cache.setCreatedAt(createdAt);
+        cache.setAvatar(avatar);
         return cache;
     }
     
@@ -114,14 +109,12 @@ public class CommentDetailCacheBO {
         hash.put("content", content != null ? content : "");
         hash.put("likeCount", String.valueOf(likeCount != null ? likeCount : 0L));
         hash.put("createdAt", String.valueOf(createdAt.atZone(ZoneOffset.UTC).toEpochSecond()));
-        hash.put("nickname", nickname != null ? nickname : "");
         hash.put("avatar", avatar != null ? avatar : "");
         
         // 可选字段（子评论特有）
         hash.put("parentId", parentId != null ? String.valueOf(parentId) : "");
         hash.put("parentUserId", parentUserId != null ? String.valueOf(parentUserId) : "");
         hash.put("rootCommentId", rootCommentId != null ? String.valueOf(rootCommentId) : "");
-        hash.put("parentNickname", parentNickname != null ? parentNickname : "");
         
         return hash;
     }
@@ -152,14 +145,12 @@ public class CommentDetailCacheBO {
             bo.setCreatedAt(LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC));
         }
         
-        bo.setNickname(hash.get("nickname"));
         bo.setAvatar(hash.get("avatar"));
         
         // 可选字段（子评论特有）
         bo.setParentId(parseOptionalLong(hash.get("parentId")));
         bo.setParentUserId(parseOptionalLong(hash.get("parentUserId")));
         bo.setRootCommentId(parseOptionalLong(hash.get("rootCommentId")));
-        bo.setParentNickname(parseOptionalString(hash.get("parentNickname")));
         
         return bo;
     }

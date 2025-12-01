@@ -1113,7 +1113,72 @@ public class CacheService {
         try {
             return Boolean.TRUE.equals(stringRedisTemplate.opsForHash().hasKey(key, field));
         } catch (Exception e) {
-            log.error("Hash判断字段存在失败: key={}, field={}, error={}", 
+            log.error("Hash判断字段存在失败: key={}, field={}, error={}",
+                     key, field, e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Hash批量获取多个字段（支持多个key）
+     * @param keyFieldsMap shardId -> ids in the shard 映射
+     * @return key -> (field -> value) 映射
+     */
+    public Map<String, Map<String, String>> hashMultiGet(Map<String, List<String>> keyFieldsMap) {
+        Map<String, Map<String, String>> result = new HashMap<>();
+        try {
+            for (Map.Entry<String, List<String>> entry : keyFieldsMap.entrySet()) {
+                // shard key
+                String key = entry.getKey();
+                // ids in the shard
+                List<String> fields = entry.getValue();
+                
+                List<Object> values = stringRedisTemplate.opsForHash().multiGet(key, new ArrayList<>(fields));
+                Map<String, String> fieldValueMap = new HashMap<>();
+                
+                for (int i = 0; i < fields.size(); i++) {
+                    Object value = values.get(i);
+                    if (value != null) {
+                        fieldValueMap.put(fields.get(i), value.toString());
+                    }
+                }
+
+                // shardId -> (id, name)map类型
+                result.put(key, fieldValueMap);
+            }
+        } catch (Exception e) {
+            log.error("Hash批量获取多个字段失败: error={}", e.getMessage(), e);
+        }
+        return result;
+    }
+    
+    /**
+     * Hash设置单个字段（不设置过期时间）
+     * @param key Hash的key
+     * @param field 字段名
+     * @param value 字段值
+     */
+    public void hashSet(String key, String field, String value) {
+        try {
+            stringRedisTemplate.opsForHash().put(key, field, value);
+        } catch (Exception e) {
+            log.error("Hash设置字段失败: key={}, field={}, error={}",
+                     key, field, e.getMessage(), e);
+            throw new RuntimeException("Hash设置字段失败: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Hash删除单个字段
+     * @param key Hash的key
+     * @param field 字段名
+     * @return 是否删除成功
+     */
+    public boolean hashDelete(String key, String field) {
+        try {
+            return stringRedisTemplate.opsForHash().delete(key, field) > 0;
+        } catch (Exception e) {
+            log.error("Hash删除字段失败: key={}, field={}, error={}",
                      key, field, e.getMessage(), e);
             return false;
         }
