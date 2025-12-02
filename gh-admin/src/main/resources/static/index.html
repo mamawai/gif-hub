@@ -1,106 +1,148 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GIF审核管理系统</title>
+    <title>GIF 审核控制台</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
+
 <body>
     <div class="container-fluid">
         <div class="row">
             <!-- 侧边栏 -->
-            <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block bg-light sidebar">
-                <div class="position-sticky">
-                    <div class="sidebar-header">
-                        <h3>GIF审核系统</h3>
+            <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky sidebar-sticky d-flex flex-column h-100">
+                    <div class="sidebar-brand mb-4">
+                        <div class="d-flex align-items-center">
+                            <div class="icon-wrapper me-2">
+                                <i class="fa-solid fa-layer-group"></i>
+                            </div>
+                            <span class="brand-text">GifHub Admin</span>
+                        </div>
                     </div>
                     <ul class="nav flex-column">
                         <li class="nav-item">
                             <a class="nav-link active" href="#" id="pending-link">
-                                待审核列表
+                                <i class="fa-solid fa-clock me-3"></i>
+                                <span>待审核</span>
+                                <span class="badge bg-primary rounded-pill ms-auto" id="pending-count"></span>
                             </a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link" href="#" id="passed-link">
-                                已通过列表
+                                <i class="fa-solid fa-check-circle me-3"></i>
+                                <span>已通过</span>
                             </a>
                         </li>
                         <li class="nav-item">
                             <a class="nav-link" href="#" id="rejected-link">
-                                已拒绝列表
+                                <i class="fa-solid fa-times-circle me-3"></i>
+                                <span>已拒绝</span>
                             </a>
                         </li>
-                        <li class="nav-item mt-3">
-                            <button class="btn btn-danger btn-sm" id="delete-all-btn">
-                                批量删除已审核记录
-                            </button>
-                        </li>
                     </ul>
+
+                    <div class="mt-auto mb-4 px-3">
+                        <button class="btn btn-danger-soft w-100 d-flex align-items-center justify-content-center"
+                            id="delete-all-btn">
+                            <i class="fa-solid fa-trash-alt me-2"></i> 清空已审核
+                        </button>
+                    </div>
                 </div>
             </nav>
 
             <!-- 主内容区 -->
-            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                    <h1 class="h2" id="page-title">待审核GIF列表</h1>
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content">
+                <div
+                    class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-4 pb-3 mb-4 border-bottom">
+                    <div>
+                        <h1 class="h3 fw-bold mb-1" id="page-title">待审核 GIF</h1>
+                        <p class="text-muted small mb-0">管理和审核用户上传的 GIF 内容</p>
+                    </div>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-white shadow-sm">
+                                <i class="fa-solid fa-filter me-1 text-muted"></i> 筛选
+                            </button>
+                            <button type="button" class="btn btn-sm btn-white shadow-sm">
+                                <i class="fa-solid fa-download me-1 text-muted"></i> 导出
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="table-responsive" id="table-container">
-                    <table class="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>预览</th>
-                                <th>标题</th>
-                                <th>描述</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="gif-list">
-                            <!-- GIF列表会通过JS动态加载 -->
-                        </tbody>
-                    </table>
+                <!-- 内容区域：从表格改为 Grid -->
+                <div id="gif-list" class="row g-4">
+                    <!-- JS 动态加载卡片 -->
                 </div>
 
                 <!-- 分页控件 -->
-                <nav aria-label="Page navigation">
+                <nav aria-label="Page navigation" class="mt-5 mb-5">
                     <ul class="pagination justify-content-center" id="pagination">
                         <!-- 分页会通过JS动态加载 -->
                     </ul>
                 </nav>
 
                 <!-- 审核详情模态框 -->
-                <div class="modal fade" id="auditModal" tabindex="-1" aria-labelledby="auditModalLabel" aria-hidden="true">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title" id="auditModalLabel">审核GIF</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <div class="modal fade" id="auditModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered modal-lg">
+                        <div class="modal-content border-0 shadow-lg">
+                            <div class="modal-header border-bottom-0 pb-0">
+                                <h5 class="modal-title fw-bold">审核详情</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                    aria-label="Close"></button>
                             </div>
-                            <div class="modal-body">
-                                <div class="text-center mb-3">
-                                    <img id="gif-preview" src="" alt="GIF预览" class="img-fluid">
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">标题</label>
-                                    <p id="gif-title"></p>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">描述</label>
-                                    <p id="gif-description"></p>
-                                </div>
-                                <div class="mb-3" id="reject-reason-container" style="display: none;">
-                                    <label for="reject-reason" class="form-label">拒绝原因</label>
-                                    <textarea class="form-control" id="reject-reason" rows="3"></textarea>
+                            <div class="modal-body p-4">
+                                <div class="row">
+                                    <div class="col-md-7">
+                                        <div
+                                            class="preview-container bg-light rounded-3 d-flex align-items-center justify-content-center overflow-hidden position-relative">
+                                            <img id="gif-preview" src="" alt="GIF预览" class="img-fluid rounded shadow-sm"
+                                                style="max-height: 400px; object-fit: contain;">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-5 mt-3 mt-md-0 d-flex flex-column">
+                                        <div class="mb-4">
+                                            <label class="text-muted small text-uppercase fw-bold mb-2">标题</label>
+                                            <h5 id="gif-title" class="fw-bold text-dark mb-0"></h5>
+                                        </div>
+                                        <div class="mb-4 flex-grow-1">
+                                            <label class="text-muted small text-uppercase fw-bold mb-2">描述</label>
+                                            <p id="gif-description" class="text-secondary"></p>
+                                        </div>
+
+                                        <div id="reject-reason-container" style="display: none;"
+                                            class="mb-3 animate__animated animate__fadeInUp">
+                                            <label for="reject-reason"
+                                                class="form-label fw-bold text-danger">拒绝原因</label>
+                                            <textarea class="form-control" id="reject-reason" rows="3"
+                                                placeholder="请输入拒绝原因..."></textarea>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                                <button type="button" class="btn btn-danger" id="btn-reject">拒绝</button>
-                                <button type="button" class="btn btn-success" id="btn-approve">通过</button>
-                                <button type="button" class="btn btn-primary d-none" id="btn-confirm-reject">确认拒绝</button>
+                            <div class="modal-footer border-top-0 px-4 pb-4">
+                                <button type="button" class="btn btn-light text-muted"
+                                    data-bs-dismiss="modal">取消</button>
+                                <div class="ms-auto d-flex gap-2">
+                                    <button type="button" class="btn btn-danger-soft" id="btn-reject">
+                                        <i class="fa-solid fa-xmark me-1"></i> 拒绝
+                                    </button>
+                                    <button type="button" class="btn btn-success-soft" id="btn-approve">
+                                        <i class="fa-solid fa-check me-1"></i> 通过
+                                    </button>
+                                    <button type="button" class="btn btn-danger d-none" id="btn-confirm-reject">
+                                        确认拒绝
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -112,4 +154,5 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script src="js/app.js"></script>
 </body>
-</html> 
+
+</html>

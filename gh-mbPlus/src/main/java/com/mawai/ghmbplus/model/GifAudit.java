@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
+
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
@@ -41,6 +42,13 @@ public class GifAudit implements Serializable {
     private Long id;
 
     /**
+     * 用户ID
+     */
+    @TableField("user_id")
+    @Schema(description = "用户ID")
+    private Long userId;
+
+    /**
      * GIF ID
      */
     @TableField("gif_id")
@@ -53,6 +61,27 @@ public class GifAudit implements Serializable {
     @TableField("file_url")
     @Schema(description = "GIF文件URL")
     private String fileUrl;
+
+    /**
+     * 标题
+     */
+    @TableField("title")
+    @Schema(description = "标题")
+    private String title;
+
+    /**
+     * 描述
+     */
+    @TableField("description")
+    @Schema(description = "描述")
+    private String description;
+
+    /**
+     * 标签
+     */
+    @TableField("tags")
+    @Schema(description = "标签")
+    private String tags;
 
     /**
      * 创建时间

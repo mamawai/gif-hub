@@ -19,16 +19,8 @@ import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.util.R2FileUtils;
 import com.mawai.ghgif.vo.GifVO;
-import com.mawai.ghmbplus.model.Gif;
-import com.mawai.ghmbplus.model.GifDelete;
-import com.mawai.ghmbplus.model.UserLike;
-import com.mawai.ghmbplus.model.Comment;
-import com.mawai.ghmbplus.model.User;
-import com.mawai.ghmbplus.service.CommentService;
-import com.mawai.ghmbplus.service.GifDeleteService;
-import com.mawai.ghmbplus.service.GifService;
-import com.mawai.ghmbplus.service.UserLikeService;
-import com.mawai.ghmbplus.service.UserService;
+import com.mawai.ghmbplus.model.*;
+import com.mawai.ghmbplus.service.*;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -39,7 +31,6 @@ import org.apache.tomcat.util.http.fileupload.FileUploadException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -81,6 +72,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final UserNicknameCacheService userNicknameCacheService;
     private final MessageService messageService;
     private final UserService userService;
+    private final GifAuditService gifAuditService;
     // 注入线程池
     private final Executor fileUploadExecutor;
     // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
@@ -201,6 +193,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @throws FileUploadException 文件上传失败时抛出
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     @RateLimiter(permitsPerSecond = (5 / 60.0), bucketCapacity = 5, message = "上传过于频繁，请稍后再试", type = RateLimiterType.UPLOAD)
     public String r2uploadGif(GifDTO gifDTO) throws FileUploadException {
         // 获取请求内容
@@ -235,24 +228,22 @@ public class GifProcessServiceImpl implements GifProcessService {
             PutObjectResponse response = s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, file.getSize()));
             log.info("文件上传成功: {}", response);
 
-            // 构建GIF消息
             String fileUrl = "https://" + R2FileUtils.CDN_DOMAIN + "/" + gifFileName;
-            GifMessage gifMessage = GifMessage.builder()
-                    .userId(userId)
-                    .title(StringUtils.hasText(title) ? title : file.getOriginalFilename())
-                    .fileUrl(fileUrl)
-                    .description(description)
-                    .tags(tags)
-                    .build();
-
-            // 发送GIF消息到SQS
-            messageService.send(JSONUtil.toJsonStr(gifMessage), SQS_QUEUE_URL, MessageType.GIF_MESSAGE);
+            // 存到审核表
+            GifAudit gifAudit = new GifAudit();
+            gifAudit.setFileUrl(fileUrl);
+            gifAudit.setCreatedAt(LocalDateTime.now());
+            gifAudit.setUserId(userId);
+            gifAudit.setTitle(title);
+            gifAudit.setDescription(description);
+            gifAudit.setTags(tags);
+            gifAuditService.save(gifAudit);
             return fileUrl;
         } catch (IOException | S3Exception e) {
             log.error("R2文件上传失败: {}", e.getMessage(), e);
             throw new FileUploadException("文件上传失败，请稍后再试");
         } catch (RuntimeException e) {
-            // 发送GIF消息到SQS失败，删除r2文件
+            // save audit失败，删除r2文件
             if (gifFileName != null) {
                 s3Client.deleteObject(
                         DeleteObjectRequest.builder()

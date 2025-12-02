@@ -178,7 +178,6 @@ public class GifMessageConsumer implements MessageConsumer {
     /**
      * 保存GIF标签信息
      */
-    // TODO 这里可以延后创建关联等审核通过后再创建tag再关联上gif
     private void saveGifTags(Long gifId, String tags) {
         List<String> tagNames = List.of(tags.split(","));
         for (String tagName : tagNames) {

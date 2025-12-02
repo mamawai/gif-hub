@@ -5,8 +5,8 @@ import com.mawai.ghadmin.service.GifAuditService;
 import com.mawai.ghcommon.domain.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,12 +14,12 @@ import java.util.List;
 @Slf4j
 @RestController
 @RequestMapping("/audit")
+@RequiredArgsConstructor
 @Tag(name = "GIF审核管理", description = "GIF审核管理相关接口")
 @CrossOrigin // 允许跨域
 public class GifAuditController {
-    
-    @Autowired
-    private GifAuditService gifAuditService;
+
+    private final GifAuditService gifAuditService;
     
     /**
      * 获取待审核GIF列表

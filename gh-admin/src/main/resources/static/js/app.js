@@ -33,18 +33,18 @@ const elements = {
 let auditModal = null;
 
 // 页面加载完成后执行
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // 初始化模态框
     auditModal = new bootstrap.Modal(document.getElementById('auditModal'));
-    
+
     // 加载待审核列表
     loadPendingGifs();
-    
+
     // 绑定事件
     elements.pendingLink.addEventListener('click', () => switchListType('pending'));
     elements.passedLink.addEventListener('click', () => switchListType('passed'));
     elements.rejectedLink.addEventListener('click', () => switchListType('rejected'));
-    
+
     elements.btnReject.addEventListener('click', showRejectForm);
     elements.btnApprove.addEventListener('click', approveGif);
     elements.btnConfirmReject.addEventListener('click', rejectGif);
@@ -63,29 +63,29 @@ document.addEventListener('DOMContentLoaded', function() {
 function switchListType(type) {
     currentListType = type;
     currentPage = 1;
-    
+
     // 更新导航栏状态
     elements.pendingLink.classList.remove('active');
     elements.passedLink.classList.remove('active');
     elements.rejectedLink.classList.remove('active');
-    
-    switch(type) {
+
+    switch (type) {
         case 'pending':
             elements.pendingLink.classList.add('active');
-            elements.pageTitle.textContent = '待审核GIF列表';
+            elements.pageTitle.textContent = '待审核 GIF';
             loadPendingGifs();
             break;
         case 'passed':
             elements.passedLink.classList.add('active');
-            elements.pageTitle.textContent = '已通过GIF列表';
+            elements.pageTitle.textContent = '已通过 GIF';
             // 当前控制器接口没有提供已审核的GIF列表，这里可以适当提示用户
-            showNoDataMessage('已通过的GIF列表功能暂未实现');
+            showNoDataMessage('已通过的 GIF 列表功能暂未实现');
             break;
         case 'rejected':
             elements.rejectedLink.classList.add('active');
-            elements.pageTitle.textContent = '已拒绝GIF列表';
+            elements.pageTitle.textContent = '已拒绝 GIF';
             // 当前控制器接口没有提供已拒绝的GIF列表，这里可以适当提示用户
-            showNoDataMessage('已拒绝的GIF列表功能暂未实现');
+            showNoDataMessage('已拒绝的 GIF 列表功能暂未实现');
             break;
     }
 }
@@ -95,10 +95,14 @@ function switchListType(type) {
  * @param {string} message - 提示信息
  */
 function showNoDataMessage(message) {
-    elements.gifList.innerHTML = '';
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="5" class="text-center">${message}</td>`;
-    elements.gifList.appendChild(tr);
+    elements.gifList.innerHTML = `
+        <div class="col-12 text-center py-5">
+            <div class="text-muted">
+                <i class="fa-regular fa-folder-open fa-3x mb-3 opacity-50"></i>
+                <p class="mt-2">${message}</p>
+            </div>
+        </div>
+    `;
     elements.pagination.innerHTML = '';
 }
 
@@ -107,7 +111,7 @@ function showNoDataMessage(message) {
  */
 function loadPendingGifs() {
     const url = `${API_BASE_URL}/pending?page=${currentPage}&pageSize=${pageSize}`;
-    
+
     fetch(url)
         .then(response => response.json())
         .then(data => {
@@ -131,31 +135,38 @@ function loadPendingGifs() {
  */
 function renderGifList(gifs) {
     elements.gifList.innerHTML = '';
-    
+
     if (!gifs || gifs.length === 0) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="5" class="text-center">暂无数据</td>';
-        elements.gifList.appendChild(tr);
+        showNoDataMessage('暂无数据');
         return;
     }
-    
+
     gifs.forEach(gif => {
-        const tr = document.createElement('tr');
-        
-        tr.innerHTML = `
-            <td>${gif.id}</td>
-            <td><img src="${gif.fileUrl}" alt="GIF预览" class="gif-preview-thumbnail"></td>
-            <td>${gif.title || '无标题'}</td>
-            <td>${gif.description || '无描述'}</td>
-            <td>
-                <button class="btn btn-primary btn-sm view-btn" data-id="${gif.id}">查看</button>
-            </td>
+        const col = document.createElement('div');
+        col.className = 'col-md-6 col-lg-4 col-xl-3 animate__animated animate__fadeIn';
+
+        col.innerHTML = `
+            <div class="gif-card">
+                <div class="gif-card-img-wrapper">
+                    <img src="${gif.fileUrl}" alt="GIF预览" class="gif-card-img" loading="lazy">
+                </div>
+                <div class="gif-card-body">
+                    <h5 class="gif-card-title" title="${gif.title || '无标题'}">${gif.title || '无标题'}</h5>
+                    <p class="gif-card-text">${gif.description || '暂无描述'}</p>
+                    <div class="gif-card-footer">
+                        <span class="badge bg-light text-secondary border">ID: ${gif.id}</span>
+                        <button class="btn btn-primary btn-sm view-btn" data-id="${gif.id}">
+                            <i class="fa-solid fa-eye me-1"></i> 审核
+                        </button>
+                    </div>
+                </div>
+            </div>
         `;
-        
-        elements.gifList.appendChild(tr);
-        
+
+        elements.gifList.appendChild(col);
+
         // 绑定查看按钮事件
-        const viewBtn = tr.querySelector('.view-btn');
+        const viewBtn = col.querySelector('.view-btn');
         viewBtn.addEventListener('click', () => openAuditModal(gif));
     });
 }
@@ -166,19 +177,19 @@ function renderGifList(gifs) {
  */
 function openAuditModal(gif) {
     currentGifId = gif.id;
-    
+
     // 重置表单
     elements.rejectReasonContainer.style.display = 'none';
     elements.btnReject.classList.remove('d-none');
     elements.btnApprove.classList.remove('d-none');
     elements.btnConfirmReject.classList.add('d-none');
     elements.rejectReason.value = '';
-    
+
     // 显示GIF详情
     elements.gifPreview.src = gif.fileUrl;
     elements.gifTitle.textContent = gif.title || '无标题';
     elements.gifDescription.textContent = gif.description || '无描述';
-    
+
     // 显示模态框
     auditModal.show();
 }
@@ -198,11 +209,11 @@ function showRejectForm() {
  */
 function approveGif() {
     if (!currentGifId) return;
-    
+
     const url = `${API_BASE_URL}/process/${currentGifId}`;
     const params = new URLSearchParams();
     params.append('status', 1); // 1表示通过
-    
+
     fetch(url, {
         method: 'POST',
         headers: {
@@ -210,17 +221,18 @@ function approveGif() {
         },
         body: params
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 200 && data.data) {
-            alert('审核已通过');
-            auditModal.hide();
-            loadPendingGifs();
-        } else {
-            alert('操作失败: ' + (data.message || '未知错误'));
-        }
-    })
-    .catch(error => console.error('请求出错:', error));
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 200 && data.data) {
+                // alert('审核已通过'); // 移除 alert，使用更友好的方式或直接关闭
+                auditModal.hide();
+                loadPendingGifs();
+                // 可以添加一个 toast 提示
+            } else {
+                alert('操作失败: ' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => console.error('请求出错:', error));
 }
 
 /**
@@ -228,17 +240,17 @@ function approveGif() {
  */
 function rejectGif() {
     if (!currentGifId) return;
-    
+
     const rejectReason = elements.rejectReason.value.trim();
     if (!rejectReason) {
         alert('请填写拒绝原因');
         return;
     }
-    
+
     const url = `${API_BASE_URL}/process/${currentGifId}`;
     const params = new URLSearchParams();
     params.append('status', 0); // 0表示拒绝
-    
+
     fetch(url, {
         method: 'POST',
         headers: {
@@ -246,17 +258,17 @@ function rejectGif() {
         },
         body: params
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 200 && data.data) {
-            alert('已拒绝审核');
-            auditModal.hide();
-            loadPendingGifs();
-        } else {
-            alert('操作失败: ' + (data.message || '未知错误'));
-        }
-    })
-    .catch(error => console.error('请求出错:', error));
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 200 && data.data) {
+                // alert('已拒绝审核');
+                auditModal.hide();
+                loadPendingGifs();
+            } else {
+                alert('操作失败: ' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => console.error('请求出错:', error));
 }
 
 /**
@@ -266,24 +278,24 @@ function deleteBatch() {
     if (!confirm('确定要删除所有已审核记录和下架的GIF吗？此操作不可恢复！')) {
         return;
     }
-    
+
     fetch(`${API_BASE_URL}/deleteBatch`, {
         method: 'DELETE'
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 200 && data.data) {
-            alert('删除成功');
-            // 刷新当前列表
-            if (currentListType === 'pending') {
-                loadPendingGifs();
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 200 && data.data) {
+                alert('删除成功');
+                // 刷新当前列表
+                if (currentListType === 'pending') {
+                    loadPendingGifs();
+                }
+            } else {
+                alert('删除失败: ' + (data.message || '未知错误'));
             }
-        } else {
-            alert('删除失败: ' + (data.message || '未知错误'));
-        }
-    })
-    .catch(error => {
-        console.error('请求出错:', error);
-        alert('网络错误，请稍后重试');
-    });
-} 
+        })
+        .catch(error => {
+            console.error('请求出错:', error);
+            alert('网络错误，请稍后重试');
+        });
+}

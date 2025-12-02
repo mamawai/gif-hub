@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
 
 @SpringBootApplication
-@ComponentScan(basePackages = {"com.mawai.ghadmin", "com.mawai.ghcommon", "com.mawai.ghmbplus"})
+@ComponentScan(basePackages = {"com.mawai.ghadmin", "com.mawai.ghcommon", "com.mawai.ghmbplus", "com.mawai.ghgif"})
 @MapperScan(basePackages = "com.mawai.ghmbplus.dao")
 public class GhAdminApplication {
 
