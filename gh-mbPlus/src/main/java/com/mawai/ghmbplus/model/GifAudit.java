@@ -49,13 +49,6 @@ public class GifAudit implements Serializable {
     private Long userId;
 
     /**
-     * GIF ID
-     */
-    @TableField("gif_id")
-    @Schema(description = "GIF ID")
-    private Long gifId;
-
-    /**
      * GIF文件URL
      */
     @TableField("file_url")

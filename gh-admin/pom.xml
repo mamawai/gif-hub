@@ -20,16 +20,17 @@
     <dependencies>
         <dependency>
             <groupId>com.mawai</groupId>
+            <artifactId>gh-aws</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mawai</groupId>
             <artifactId>gh-mbPlus</artifactId>
         </dependency>
         <dependency>
             <groupId>com.mawai</groupId>
             <artifactId>gh-common</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.mawai</groupId>
-            <artifactId>gh-gif</artifactId>
-        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

@@ -1,7 +1,6 @@
-package com.mawai.ghgif.amazonSQS;
+package com.mawai.ghaws.sqs;
 
-import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
-import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghaws.constant.MessageType;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;

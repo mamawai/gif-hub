@@ -1,11 +1,11 @@
-package com.mawai.ghgif.amazonSQS.consumer;
+package com.mawai.ghaws.sqs;
 
-import java.util.function.Consumer;
-
-import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghaws.constant.MessageType;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.services.sqs.model.Message;
+
+import java.util.function.Consumer;
 
 public interface MessageConsumer {
 

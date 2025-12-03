@@ -1,4 +1,4 @@
-package com.mawai.ghgif.util;
+package com.mawai.ghaws.r2;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;

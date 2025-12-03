@@ -1,4 +1,4 @@
-package com.mawai.ghgif.constant;
+package com.mawai.ghaws.constant;
 
 import lombok.Getter;
 

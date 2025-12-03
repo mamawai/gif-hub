@@ -2,12 +2,13 @@ package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
+import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.utils.SpringUtils;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentHandler;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentResult;
 import com.mawai.ghgif.amazonSQS.message.CommentMessage;
-import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghmbplus.model.Comment;
 import com.mawai.ghmbplus.service.CommentService;
 import lombok.RequiredArgsConstructor;

@@ -17,6 +17,7 @@
 
     <modules>
         <module>gh-admin</module>
+        <module>gh-aws</module>
         <module>gh-common</module>
         <module>gh-gif</module>
         <module>gh-mbPlus</module>
@@ -49,6 +50,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.mawai</groupId>
+                <artifactId>gh-aws</artifactId>
+                <version>${gh.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.mawai</groupId>
                 <artifactId>gh-common</artifactId>
@@ -216,10 +222,6 @@
 
 
     <dependencies>
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-        </dependency>
         <dependency>
             <groupId>javax.activation</groupId>
             <artifactId>activation</artifactId>

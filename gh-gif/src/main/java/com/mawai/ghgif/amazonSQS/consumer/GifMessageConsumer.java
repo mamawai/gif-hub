@@ -1,14 +1,15 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.json.JSONUtil;
+import com.mawai.ghaws.message.GifMessage;
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
+import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.service.CacheService;
+import com.mawai.ghcommon.utils.PinYinUtils;
 import com.mawai.ghcommon.utils.SpringUtils;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentHandler;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentResult;
-import com.mawai.ghgif.amazonSQS.message.GifMessage;
-import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.MessageService;
-import com.mawai.ghgif.util.PinYinUtils;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.GifTag;

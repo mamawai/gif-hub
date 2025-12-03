@@ -1,12 +1,12 @@
 package com.mawai.ghgif.service;
 
 import cn.hutool.core.util.StrUtil;
-import com.mawai.ghgif.amazonSQS.AmazonSQSClientConfig;
-import com.mawai.ghgif.amazonSQS.MessageRouter;
-import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
-import com.mawai.ghgif.amazonSQS.util.CustomSQSMessageConsumer;
-import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.impl.MessageServiceImpl;
+import com.mawai.ghaws.sqs.AmazonSQSClientConfig;
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.impl.MessageServiceImpl;
+import com.mawai.ghaws.sqs.MessageRouter;
+import com.mawai.ghaws.sqs.util.CustomSQSMessageConsumer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;

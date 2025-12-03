@@ -29,11 +29,11 @@
             <version>3.4.1</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/software.amazon.awssdk/sqs -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>sqs</artifactId>
-            <version>2.29.52</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>software.amazon.awssdk</groupId>-->
+<!--            <artifactId>sqs</artifactId>-->
+<!--            <version>2.29.52</version>-->
+<!--        </dependency>-->
         <!-- 移除虚拟队列相关依赖，使用普通SQS队列 -->
 <!--        <dependency>-->
 <!--            <groupId>com.amazonaws</groupId>-->
@@ -45,6 +45,10 @@
 <!--            <artifactId>spring-cloud-aws-messaging</artifactId>-->
 <!--            <version>2.2.6.RELEASE</version>-->
 <!--        </dependency>-->
+        <dependency>
+            <groupId>com.mawai</groupId>
+            <artifactId>gh-aws</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.mawai</groupId>
             <artifactId>gh-common</artifactId>
@@ -72,11 +76,11 @@
             <artifactId>mapstruct-processor</artifactId>
         </dependency>
 
-        <!-- AWS SDK for S3 (兼容Cloudflare R2) -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>s3</artifactId>
-        </dependency>
+<!--        &lt;!&ndash; AWS SDK for S3 (兼容Cloudflare R2) &ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>software.amazon.awssdk</groupId>-->
+<!--            <artifactId>s3</artifactId>-->
+<!--        </dependency>-->
 
         <!-- HTTP客户端用于底层请求 -->
         <dependency>
@@ -84,10 +88,10 @@
             <artifactId>httpclient</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>ec2</artifactId>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>software.amazon.awssdk</groupId>-->
+<!--            <artifactId>ec2</artifactId>-->
+<!--        </dependency>-->
     </dependencies>
 
     <build>

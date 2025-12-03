@@ -1,11 +1,12 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.batch.BatchMessageWrapper;
+import com.mawai.ghaws.sqs.batch.BatchProcessor;
+import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
+import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.utils.SpringUtils;
-import com.mawai.ghgif.amazonSQS.batch.BatchMessageWrapper;
-import com.mawai.ghgif.amazonSQS.batch.BatchProcessor;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentHandler;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentResult;
-import com.mawai.ghgif.service.MessageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;

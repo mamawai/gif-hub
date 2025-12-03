@@ -5,11 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.ghadmin.dto.GifAuditDTO;
 import com.mawai.ghadmin.dtoMapper.GifAuditParamMapper;
-import com.mawai.ghadmin.service.GifAuditService;
-import com.mawai.ghgif.amazonSQS.message.GifMessage;
-import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.MessageService;
-import com.mawai.ghgif.util.R2FileUtils;
+import com.mawai.ghaws.message.GifMessage;
+import com.mawai.ghadmin.service.GifAuditProcessService;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.r2.R2FileUtils;
+import com.mawai.ghaws.service.MessageService;
 import com.mawai.ghmbplus.dao.GifAuditMapper;
 import com.mawai.ghmbplus.dao.GifMapper;
 import com.mawai.ghmbplus.model.Gif;
@@ -34,12 +34,12 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class GifAuditServiceImpl implements GifAuditService {
+public class GifAuditProcessServiceImpl implements GifAuditProcessService {
     private final GifAuditMapper gifAuditMapper;
     private final GifMapper gifMapper;
-    private final GifAuditParamMapper gifAuditParamMapper;
     private final MessageService messageService;
     private final R2FileUtils r2FileUtils;
+    private final GifAuditParamMapper gifAuditParamMapper;
 
     @Value("${aws.sqs.base-queue-url}")
     private String SQS_QUEUE_URL;

@@ -8,39 +8,46 @@
         <version>0.0.1-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <artifactId>gh-common</artifactId>
+    <artifactId>gh-aws</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>gh-common</name>
-    <description>gh-common</description>
+    <name>gh-aws</name>
+    <description>gh-aws</description>
     <packaging>jar</packaging>
 
     <properties>
         <java.version>21</java.version>
     </properties>
+
+
     <dependencies>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <groupId>com.mawai</groupId>
+            <artifactId>gh-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springdoc</groupId>
-            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <groupId>com.mawai</groupId>
+            <artifactId>gh-mbPlus</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sqs</artifactId>
+            <version>2.29.52</version>
         </dependency>
-        
-        <!-- Sa-Token 权限认证，统一配置 -->
+        <!-- AWS SDK for S3 (兼容Cloudflare R2) -->
         <dependency>
-            <groupId>cn.dev33</groupId>
-            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
-        
-        <!-- Sa-Token 整合 Redis -->
+
+        <!-- HTTP客户端用于底层请求 -->
         <dependency>
-            <groupId>cn.dev33</groupId>
-            <artifactId>sa-token-redis-jackson</artifactId>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

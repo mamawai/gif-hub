@@ -1,4 +1,4 @@
-package com.mawai.ghgif.amazonSQS.batch;
+package com.mawai.ghaws.sqs.batch;
 
 import lombok.extern.slf4j.Slf4j;
 

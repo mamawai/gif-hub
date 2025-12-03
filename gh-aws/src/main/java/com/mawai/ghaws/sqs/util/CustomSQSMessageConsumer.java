@@ -1,7 +1,7 @@
-package com.mawai.ghgif.amazonSQS.util;
+package com.mawai.ghaws.sqs.util;
 
-import com.mawai.ghgif.amazonSQS.MessageRouter;
-import com.mawai.ghgif.amazonSQS.consumer.MessageConsumer;
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.sqs.MessageRouter;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;

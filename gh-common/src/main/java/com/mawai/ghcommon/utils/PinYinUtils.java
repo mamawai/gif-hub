@@ -1,4 +1,4 @@
-package com.mawai.ghgif.util;
+package com.mawai.ghcommon.utils;
 
 import cn.hutool.extra.pinyin.engine.pinyin4j.Pinyin4jEngine;
 import jakarta.annotation.PostConstruct;

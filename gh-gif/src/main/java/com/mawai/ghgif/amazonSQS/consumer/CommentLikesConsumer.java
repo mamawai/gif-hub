@@ -1,11 +1,11 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.json.JSONUtil;
-import com.mawai.ghgif.amazonSQS.idempotent.IdempotentHandler;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
 import com.mawai.ghgif.amazonSQS.message.CommentLikesMessage;
-import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.service.CommentProcessService;
-import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.model.CommentLike;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +29,7 @@ public class CommentLikesConsumer extends AbstractBatchLikesConsumer<CommentLike
 
     private static final String CONSUMER_TYPE = "commentlikes";
 
-    public CommentLikesConsumer(MessageService messageService, 
+    public CommentLikesConsumer(MessageService messageService,
                                 IdempotentHandler idempotentHandler,
                                 CommentLikeMapper commentLikeMapper,
                                 CommentProcessService commentProcessService) {

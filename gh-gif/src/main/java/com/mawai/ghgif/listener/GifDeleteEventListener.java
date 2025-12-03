@@ -1,8 +1,8 @@
 package com.mawai.ghgif.listener;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mawai.ghaws.r2.R2FileUtils;
 import com.mawai.ghgif.event.GifDeleteEvent;
-import com.mawai.ghgif.util.R2FileUtils;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.GifDeleteFailed;
 import com.mawai.ghmbplus.model.GifTag;

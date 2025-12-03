@@ -1,8 +1,8 @@
-package com.mawai.ghgif.service.impl;
+package com.mawai.ghaws.service.impl;
 
-import com.mawai.ghgif.amazonSQS.AmazonSQSClientConfig;
-import com.mawai.ghgif.constant.MessageType;
-import com.mawai.ghgif.service.MessageService;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.AmazonSQSClientConfig;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;

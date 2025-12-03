@@ -1,6 +1,6 @@
-package com.mawai.ghgif.service;
+package com.mawai.ghaws.service;
 
-import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghaws.constant.MessageType;
 
 /**
  * 消息服务接口

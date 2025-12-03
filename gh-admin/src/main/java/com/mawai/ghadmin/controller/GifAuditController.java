@@ -1,7 +1,7 @@
 package com.mawai.ghadmin.controller;
 
 import com.mawai.ghadmin.dto.GifAuditDTO;
-import com.mawai.ghadmin.service.GifAuditService;
+import com.mawai.ghadmin.service.GifAuditProcessService;
 import com.mawai.ghcommon.domain.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,7 +19,7 @@ import java.util.List;
 @CrossOrigin // 允许跨域
 public class GifAuditController {
 
-    private final GifAuditService gifAuditService;
+    private final GifAuditProcessService gifAuditService;
     
     /**
      * 获取待审核GIF列表

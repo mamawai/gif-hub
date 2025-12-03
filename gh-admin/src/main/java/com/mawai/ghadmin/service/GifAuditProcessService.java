@@ -7,7 +7,7 @@ import java.util.List;
 /**
  * GIF审核服务接口
  */
-public interface GifAuditService {
+public interface GifAuditProcessService {
     
     /**
      * 获取待审核的GIF列表

@@ -1,4 +1,4 @@
-package com.mawai.ghgif.amazonSQS.message;
+package com.mawai.ghaws.message;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

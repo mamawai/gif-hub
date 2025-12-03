@@ -2,14 +2,15 @@ package com.mawai.ghgif.amazonSQS.consumer;
 
 import java.util.function.Consumer;
 
-import com.mawai.ghgif.constant.MessageType;
+import com.mawai.ghaws.sqs.MessageConsumer;
+import com.mawai.ghaws.constant.MessageType;
 import software.amazon.awssdk.services.sqs.model.Message;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-public class EmailMessageConsumer implements MessageConsumer{
+public class EmailMessageConsumer implements MessageConsumer {
 
     @Override
     public Consumer<Message> handleMessage() {

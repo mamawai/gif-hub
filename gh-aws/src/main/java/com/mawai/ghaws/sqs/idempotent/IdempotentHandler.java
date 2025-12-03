@@ -1,4 +1,4 @@
-package com.mawai.ghgif.amazonSQS.idempotent;
+package com.mawai.ghaws.sqs.idempotent;
 
 import com.mawai.ghcommon.service.CacheService;
 import lombok.RequiredArgsConstructor;

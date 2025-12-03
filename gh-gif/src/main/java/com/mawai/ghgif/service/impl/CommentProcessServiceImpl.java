@@ -2,16 +2,16 @@ package com.mawai.ghgif.service.impl;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.service.MessageService;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.service.UserNicknameCacheService;
 import com.mawai.ghgif.amazonSQS.message.CommentMessage;
 import com.mawai.ghgif.annotation.RateLimiter;
-import com.mawai.ghgif.constant.MessageType;
 import com.mawai.ghgif.constant.RateLimiterType;
 import com.mawai.ghgif.dto.CommentDTO;
 import com.mawai.ghgif.modelMapper.CommentParamMapper;
 import com.mawai.ghgif.service.CommentProcessService;
-import com.mawai.ghgif.service.MessageService;
 import com.mawai.ghgif.service.ModerationService;
 import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
