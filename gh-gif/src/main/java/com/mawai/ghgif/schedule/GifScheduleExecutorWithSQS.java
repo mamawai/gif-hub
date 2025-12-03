@@ -45,10 +45,10 @@ public class GifScheduleExecutorWithSQS {
     private final Executor virtualDataFetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
     // 虚拟线程并发控制 - 限制同时处理的用户数据获取任务数量
     // 避免在用户数量过多时创建过多虚拟线程导致内存溢出
-    private static final int DATA_FETCH_CONCURRENCY_LIMIT = 300;
+    private static final int DATA_FETCH_CONCURRENCY_LIMIT = 50;
     private final Semaphore dataFetchSemaphore = new Semaphore(DATA_FETCH_CONCURRENCY_LIMIT);
 
-    private static final int SYNC_INTERVAL = 1; // 同步间隔
+    private static final int SYNC_INTERVAL = 10; // 同步间隔
 
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
