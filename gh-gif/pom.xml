@@ -23,11 +23,11 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <!-- https://mvnrepository.com/artifact/de.codecentric/spring-boot-admin-starter-client -->
-        <dependency>
-            <groupId>de.codecentric</groupId>
-            <artifactId>spring-boot-admin-starter-client</artifactId>
-            <version>3.4.1</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>de.codecentric</groupId>-->
+<!--            <artifactId>spring-boot-admin-starter-client</artifactId>-->
+<!--            <version>3.4.1</version>-->
+<!--        </dependency>-->
         <!-- https://mvnrepository.com/artifact/software.amazon.awssdk/sqs -->
 <!--        <dependency>-->
 <!--            <groupId>software.amazon.awssdk</groupId>-->

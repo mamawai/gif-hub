@@ -22,7 +22,7 @@
         <module>gh-gif</module>
         <module>gh-mbPlus</module>
         <module>gh-weixin</module>
-        <module>gh-monitor</module>
+<!--        <module>gh-monitor</module>-->
     </modules>
 
 
