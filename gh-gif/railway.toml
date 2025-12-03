@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "java -jar target/gh-gif-0.0.1-SNAPSHOT.jar"

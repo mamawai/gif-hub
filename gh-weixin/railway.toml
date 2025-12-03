@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "java -jar target/gh-weixin-0.0.0.1-SNAPSHOT.jar"
