@@ -1,9 +1,5 @@
-# gh-admin/railway.toml
-[build]
-builder = "nixpacks"
-buildCommand = "mvn -B -DskipTests clean install && ls -la gh-admin/target/ && mkdir -p target && cp gh-admin/target/*.jar target/ && ls -la target/"
-
 [deploy]
-startCommand = "java -jar target/gh-admin-0.0.1-SNAPSHOT.jar"
+# 明确指定启动 gh-admin 的 jar 包（多模块项目必须指定具体文件名）
+startCommand = "java -Dserver.port=$PORT $JAVA_OPTS -jar target/gh-admin-0.0.1-SNAPSHOT.jar"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10

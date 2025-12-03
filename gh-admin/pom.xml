@@ -50,6 +50,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 将最终的 jar 包输出到项目根目录的 target 目录 -->
+                    <outputDirectory>../target</outputDirectory>
+                </configuration>
             </plugin>
             <!-- 配置插件来支持 MapStruct 注解处理 https://blog.csdn.net/weixin_45697659/article/details/131001384-->
             <plugin>
