@@ -1,49 +1,38 @@
-#
-#spring:
-#  # 邮件配置
-#  mail:
-#    host: smtp.example.com
-#    port: 587
-#    username: your-email@example.com
-#    password: your-email-password
-#    properties:
-#      mail:
-#        smtp:
-#          auth: true
-#          starttls:
-#            enable: true
-
 spring:
   application:
     name: gh-weixin
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      username: ${REDIS_USERNAME:default}
+      password: ${REDIS_PASSWORD}
       database: 0
   datasource:
-    url: jdbc:mysql://localhost:3306/gif_hub?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
-    username: root
-    password:
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 300000
+      max-lifetime: 550000
 
-# MyBatis-Plus配置
 mybatis-plus:
   mapper-locations: classpath*:./mappers/**/*.xml
 
-# 端口
 server:
   port: 8083
+  address: 0.0.0.0
 
-
-# 邮件配置
 resend:
-  api-key: ''
-  from-email: 'noreply@mynnmy.top'
+  api-key: ${RESEND_API_KEY}
+  from-email: ${RESEND_FROM_EMAIL}
 
-# 微信配置
 wechat:
-  appId: ''
-  secret: ''
-  grantType: 'authorization_code'
-  loginUrl: 'https://api.weixin.qq.com/sns/jscode2session'
+  appId: ${WECHAT_APP_ID}
+  secret: ${WECHAT_SECRET}
+  grantType: authorization_code
+  loginUrl: https://api.weixin.qq.com/sns/jscode2session

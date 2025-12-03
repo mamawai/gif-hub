@@ -1,109 +1,90 @@
 spring:
   application:
     name: gh-gif
-  # 启用虚拟线程支持
   threads:
     virtual:
       enabled: true
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      username: ${REDIS_USERNAME:default}
+      password: ${REDIS_PASSWORD}
       database: 0
   datasource:
-    url: jdbc:mysql://localhost:3306/gif_hub?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
-    username: root
-    password:
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 300000
+      max-lifetime: 550000
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
-  boot:
-    admin:
-      client:
-        url: http://localhost:8081
 
-# MyBatis-Plus配置
 mybatis-plus:
   mapper-locations: classpath*:./mappers/**/*.xml
+
 server:
   port: 8080
+  address: 0.0.0.0
 
-# actuator
 management:
   endpoints:
     web:
       exposure:
         include: '*'
 
-# AWS SQS 配置
 aws:
   sqs:
-    # 基础队列URL
-    base-queue-url:
-    # 邮件队列URL
-    email-queue-url:
-    # AWS区域
-    region:
-  # AWS凭据
-  access-key-id:
-  secret-access-key:
+    base-queue-url: ${AWS_SQS_BASE_QUEUE_URL}
+    email-queue-url: ${AWS_SQS_EMAIL_QUEUE_URL}
+    region: ${AWS_REGION}
+  access-key-id: ${AWS_ACCESS_KEY_ID}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY}
 
-# cloudflare r2
 cloudflare:
   aws:
     s3:
-      # 替换为实际accountID
-      endpoint:
-      # 替换为实际存储桶名
-      bucket-name: gif-hub
-      # 替换为自定义域名
-      cdn-domain: mynnmy.top
-      # 自动识别区域
+      endpoint: ${CLOUDFLARE_S3_ENDPOINT}
+      bucket-name: ${CLOUDFLARE_BUCKET_NAME}
+      cdn-domain: ${CLOUDFLARE_CDN_DOMAIN}
       region: auto
       credentials:
-        # 替换为API访问密钥
-        access-key:
-        # 替换为API秘密密钥
-        secret-key:
-
+        access-key: ${CLOUDFLARE_ACCESS_KEY}
+        secret-key: ${CLOUDFLARE_SECRET_KEY}
 
 redis:
   scanCount: 1000
 
-# OpenAI Moderation API配置（通过CloseAI中转）
 openai:
   api:
-    # CloseAI中转地址（官方：https://api.openai-proxy.org/v1）
-    base-url: https://api.openai-proxy.org/v1
-    # 你的API Key（替换为CloseAI提供的key或原始OpenAI key）
-    key: 
+    base-url: ${OPENAI_BASE_URL}
+    key: ${OPENAI_API_KEY}
   moderation:
-    # 是否启用内容审核（开发环境可设为false）
     enabled: true
-    # 审核模型：omni-moderation-latest 支持文本和图像
     model: omni-moderation-latest
-    # API调用超时时间（毫秒）
     timeout: 3000
-    # 审核失败时的降级策略：true=放行，false=拦截
     fail-open: true
-    # 各类别违规阈值（0.0-1.0，分数>=阈值则判定为违规）
     thresholds:
-      sexual: 0.30                    # 色情内容
-      sexual/minors: 0.20             # 未成年色情（零容忍）
-      violence: 0.40                  # 暴力内容
-      violence/graphic: 0.35          # 暴力血腥
-      hate: 0.35                      # 仇恨言论
-      hate/threatening: 0.25          # 威胁性仇恨（零容忍）
-      harassment: 0.45                # 骚扰信息（适度宽松）
-      harassment/threatening: 0.30    # 威胁性骚扰
-      self-harm: 0.35                 # 自残内容
-      self-harm/intent: 0.30          # 自残意图
-      self-harm/instructions: 0.25    # 自残教唆（零容忍）
+      sexual: 0.30
+      sexual/minors: 0.20
+      violence: 0.40
+      violence/graphic: 0.35
+      hate: 0.35
+      hate/threatening: 0.25
+      harassment: 0.45
+      harassment/threatening: 0.30
+      self-harm: 0.35
+      self-harm/intent: 0.30
+      self-harm/instructions: 0.25
 
-# Giphy API配置
 giphy:
   api:
-    key:
+    key: ${GIPHY_API_KEY}
     base-url: https://api.giphy.com/v1/gifs
