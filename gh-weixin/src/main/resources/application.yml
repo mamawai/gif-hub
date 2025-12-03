@@ -3,11 +3,12 @@ spring:
     name: gh-weixin
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-      username: ${REDIS_USERNAME:default}
-      password: ${REDIS_PASSWORD}
-      database: 0
+      url: ${REDIS_URL}
+#      host: ${REDIS_HOST}
+#      port: ${REDIS_PORT}
+#      username: ${REDIS_USERNAME:default}
+#      password: ${REDIS_PASSWORD}
+#      database: 0
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
