@@ -1,7 +1,7 @@
 # gh-admin/railway.toml
 [build]
 builder = "nixpacks"
-buildCommand = "mvn -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install -Pproduction && mkdir -p target && cp gh-admin/target/gh-admin-0.0.1-SNAPSHOT.jar target/"
+buildCommand = "mvn -B -DskipTests clean install && ls -la gh-admin/target/ && mkdir -p target && cp gh-admin/target/*.jar target/ && ls -la target/"
 
 [deploy]
 startCommand = "java -jar target/gh-admin-0.0.1-SNAPSHOT.jar"

@@ -1,7 +1,7 @@
 # gh-gif/railway.toml
 [build]
 builder = "nixpacks"
-buildCommand = "mvn -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install -Pproduction && mkdir -p target && cp gh-gif/target/gh-gif-0.0.1-SNAPSHOT.jar target/"
+buildCommand = "mvn -B -DskipTests clean install && ls -la gh-gif/target/ && mkdir -p target && cp gh-gif/target/*.jar target/ && ls -la target/"
 
 [deploy]
 startCommand = "java -jar target/gh-gif-0.0.1-SNAPSHOT.jar"
