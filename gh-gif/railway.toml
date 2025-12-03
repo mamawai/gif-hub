@@ -1,3 +1,7 @@
 # gh-gif/railway.toml
+# 方案1(推荐):在 Railway 控制台 Settings -> Root Directory 设置为 "gh-gif"
+# 然后使用相对路径:java -jar target/gh-gif-0.0.1-SNAPSHOT.jar
+#
+# 方案2:不设置 Root Directory,使用绝对路径
 [deploy]
-startCommand = "java -jar gh-gif/target/gh-gif-0.0.1-SNAPSHOT.jar"
+startCommand = "java -jar /app/gh-gif/target/gh-gif-0.0.1-SNAPSHOT.jar"
