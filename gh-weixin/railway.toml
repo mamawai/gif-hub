@@ -1,3 +1,9 @@
 # gh-weixin/railway.toml
+[build]
+builder = "nixpacks"
+buildCommand = "mvn -DoutputFile=target/mvn-dependency-list.log -B -DskipTests clean dependency:list install -Pproduction && mkdir -p target && cp gh-weixin/target/gh-weixin-0.0.1-SNAPSHOT.jar target/"
+
 [deploy]
-startCommand = "java -jar /app/gh-weixin/target/gh-weixin-0.0.1-SNAPSHOT.jar"
+startCommand = "java -jar target/gh-weixin-0.0.1-SNAPSHOT.jar"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
