@@ -77,7 +77,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final Executor fileUploadExecutor;
     // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
     // 避免批量上传时触发 R2 API 限流或占用过多网络带宽
-    private static final int FILE_UPLOAD_CONCURRENCY_LIMIT = 100;
+    private static final int FILE_UPLOAD_CONCURRENCY_LIMIT = 30;
     private final Semaphore fileUploadSemaphore = new Semaphore(FILE_UPLOAD_CONCURRENCY_LIMIT);
 
     // S3客户端实例

@@ -48,7 +48,10 @@ public class GifScheduleExecutorWithSQS {
     private static final int DATA_FETCH_CONCURRENCY_LIMIT = 50;
     private final Semaphore dataFetchSemaphore = new Semaphore(DATA_FETCH_CONCURRENCY_LIMIT);
 
-    private static final int SYNC_INTERVAL = 10; // 同步间隔
+    // 同步间隔配置（分钟）
+    private static final int SYNC_INTERVAL_GROUP_1 = 9;  // 第一组：GIF 统计数据（下载、查看）
+    private static final int SYNC_INTERVAL_GROUP_2 = 10; // 第二组：点赞相关数据（GIF点赞、用户点赞）
+    private static final int SYNC_INTERVAL_GROUP_3 = 11; // 第三组：评论相关数据（评论点赞、用户评论点赞）
 
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
@@ -69,11 +72,10 @@ public class GifScheduleExecutorWithSQS {
     private Integer SCAN_COUNT;
 
     /**
-     * 定时同步 Redis 增量数据到 PG
+     * 【第一组】定时同步 GIF 统计数据到数据库
      *
      * <p>
-     * 每分钟执行一次，将 Redis 中累积的增量统计数据批量同步到数据库。
-     * 采用 CompletableFuture 并发执行 6 个同步任务，互不阻塞。
+     * 每 9 分钟执行一次，同步 GIF 下载次数和查看次数。
      * </p>
      *
      * <p>
@@ -82,10 +84,6 @@ public class GifScheduleExecutorWithSQS {
      * <ul>
      * <li>GIF 下载次数 - 直接更新数据库</li>
      * <li>GIF 查看次数 - 直接更新数据库</li>
-     * <li>GIF 点赞次数 - 直接更新数据库</li>
-     * <li>用户点赞记录 - 发送到 SQS 异步处理</li>
-     * <li>评论点赞次数 - 直接更新数据库</li>
-     * <li>用户评论点赞记录 - 发送到 SQS 异步处理</li>
      * </ul>
      *
      * <p>
@@ -94,14 +92,11 @@ public class GifScheduleExecutorWithSQS {
      *
      * @see #syncDownloadCountToDatabase()
      * @see #syncViewCountsToDatabase()
-     * @see #syncLikeCountsToDatabase()
-     * @see #syncUserLikesToDatabaseConcurrent()
-     * @see #syncCommentLikeCountsToDatabase()
-     * @see #syncUserCommentLikesToDatabase()
      */
-    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000)
-    public void syncGifLikeCount() {
-        log.info("开始同步方法...");
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_1 * 60 * 1000)
+    public void syncGifStatisticsGroup1() {
+        log.info("【第一组】开始同步 GIF 统计数据（下载、查看）...");
+
         // 使用CompletableFuture并发执行，不等待完成
         CompletableFuture
                 .runAsync(this::syncDownloadCountToDatabase, scheduledExecutor)
@@ -117,6 +112,35 @@ public class GifScheduleExecutorWithSQS {
                     return null;
                 });
 
+        log.info("【第一组】已启动 GIF 统计数据同步任务，将在 {} 分钟后再次触发", SYNC_INTERVAL_GROUP_1);
+    }
+
+    /**
+     * 【第二组】定时同步点赞相关数据到数据库
+     *
+     * <p>
+     * 每 10 分钟执行一次，同步 GIF 点赞次数和用户点赞记录。
+     * </p>
+     *
+     * <p>
+     * <b>同步任务列表：</b>
+     * </p>
+     * <ul>
+     * <li>GIF 点赞次数 - 直接更新数据库</li>
+     * <li>用户点赞记录 - 发送到 SQS 异步处理</li>
+     * </ul>
+     *
+     * <p>
+     * <b>设计理念：</b>高频操作写 Redis（快），定时批量同步到 PG（减压）
+     * </p>
+     *
+     * @see #syncLikeCountsToDatabase()
+     * @see #syncUserLikesToDatabaseConcurrent()
+     */
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_2 * 60 * 1000)
+    public void syncLikeDataGroup2() {
+        log.info("【第二组】开始同步点赞相关数据（GIF点赞、用户点赞）...");
+
         CompletableFuture
                 .runAsync(this::syncLikeCountsToDatabase, scheduledExecutor)
                 .exceptionally(e -> {
@@ -130,6 +154,35 @@ public class GifScheduleExecutorWithSQS {
                     log.error("同步用户喜欢记录失败: {}", e.getMessage(), e);
                     return null;
                 });
+
+        log.info("【第二组】已启动点赞数据同步任务，将在 {} 分钟后再次触发", SYNC_INTERVAL_GROUP_2);
+    }
+
+    /**
+     * 【第三组】定时同步评论相关数据到数据库
+     *
+     * <p>
+     * 每 11 分钟执行一次，同步评论点赞次数和用户评论点赞记录。
+     * </p>
+     *
+     * <p>
+     * <b>同步任务列表：</b>
+     * </p>
+     * <ul>
+     * <li>评论点赞次数 - 直接更新数据库</li>
+     * <li>用户评论点赞记录 - 发送到 SQS 异步处理</li>
+     * </ul>
+     *
+     * <p>
+     * <b>设计理念：</b>高频操作写 Redis（快），定时批量同步到 PG（减压）
+     * </p>
+     *
+     * @see #syncCommentLikeCountsToDatabase()
+     * @see #syncUserCommentLikesToDatabase()
+     */
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_3 * 60 * 1000)
+    public void syncCommentDataGroup3() {
+        log.info("【第三组】开始同步评论相关数据（评论点赞、用户评论点赞）...");
 
         CompletableFuture
                 .runAsync(this::syncCommentLikeCountsToDatabase, scheduledExecutor)
@@ -145,8 +198,7 @@ public class GifScheduleExecutorWithSQS {
                     return null;
                 });
 
-        // 无需等待所有任务完成，直接返回
-        log.info("已启动GIF数据同步任务，将在{}分钟后再次触发同步", SYNC_INTERVAL);
+        log.info("【第三组】已启动评论数据同步任务，将在 {} 分钟后再次触发", SYNC_INTERVAL_GROUP_3);
     }
 
     /**
@@ -579,7 +631,7 @@ public class GifScheduleExecutorWithSQS {
      * </p>
      */
     // @Scheduled(cron = "0 0 3 * * ?")
-    @Scheduled(fixedRate = SYNC_INTERVAL * 60 * 1000) // 测试用
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_2 * 60 * 1000) // 测试用，使用第二组的间隔（10分钟）
     public void cleanupDeletedComments() {
         try {
             // LocalDateTime expireTime = LocalDateTime.now().minusDays(1);

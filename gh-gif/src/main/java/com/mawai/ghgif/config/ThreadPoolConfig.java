@@ -24,27 +24,37 @@ public class ThreadPoolConfig {
     /**
      * 定时任务专用线程池
      *
-     * <p>配置说明：</p>
+     * <p>配置说明（已优化）：</p>
      * <ul>
-     *   <li>核心线程数 6：对应 syncGifLikeCount() 中的 6 个并发任务</li>
-     *   <li>最大线程数 12：允许 2 轮任务同时执行（应对任务延迟）</li>
-     *   <li>队列容量 6：只允许 1 轮任务排队，避免无限堆积</li>
+     *   <li>核心线程数 2：每组定时任务最多 2 个并发子任务</li>
+     *   <li>最大线程数 6：极端情况下允许 3 组任务同时执行（每组 2 个线程）</li>
+     *   <li>队列容量 4：允许 2 组任务排队（每组 2 个任务）</li>
      *   <li>拒绝策略 CallerRunsPolicy：超过容量时由调度线程执行，起到背压作用</li>
+     *   <li>允许核心线程超时：空闲时自动回收，节省内存</li>
+     * </ul>
+     *
+     * <p><b>优化效果：</b></p>
+     * <ul>
+     *   <li>内存占用：从 12 线程 × 1MB ≈ 12MB → 6 线程 × 1MB ≈ 6MB（节省 50%）</li>
+     *   <li>任务分组：3 组错开执行（9min、10min、11min），降低瞬时峰值</li>
+     *   <li>正常情况：只使用 2 个核心线程，空闲后自动回收</li>
      * </ul>
      */
     @Bean("scheduledExecutor")
     public Executor scheduledExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数：6（对应6个并发任务）
-        executor.setCorePoolSize(6);
-        // 最大线程数：12（允许2轮任务同时执行）
-        executor.setMaxPoolSize(12);
-        // 队列容量：6（只允许1轮任务排队）
-        executor.setQueueCapacity(6);
+        // 核心线程数：2（每组定时任务最多 2 个并发子任务）
+        executor.setCorePoolSize(2);
+        // 最大线程数：6（极端情况下 3 组同时执行，每组 2 个线程）
+        executor.setMaxPoolSize(6);
+        // 队列容量：4（允许 2 组任务排队，每组 2 个任务）
+        executor.setQueueCapacity(4);
         // 线程名前缀
         executor.setThreadNamePrefix("scheduled-");
-        // 线程空闲时间
+        // 线程空闲时间：60 秒后回收
         executor.setKeepAliveSeconds(60);
+        // 允许核心线程超时回收（节省内存）
+        executor.setAllowCoreThreadTimeOut(true);
         // 拒绝策略：由调用线程处理（如果真的堆积，让调度线程自己执行）
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         // 等待所有任务结束后再关闭线程池

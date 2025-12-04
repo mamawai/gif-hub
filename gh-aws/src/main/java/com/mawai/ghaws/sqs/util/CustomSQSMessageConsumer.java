@@ -59,7 +59,7 @@ public class CustomSQSMessageConsumer implements AutoCloseable {
     // 状态控制
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CountDownLatch terminated;
-    private static final int CONCURRENCY_LIMIT = 300; // Semaphore最大并发数 -- Hikari10个线程支持6000tps
+    private static final int CONCURRENCY_LIMIT = 60; // Semaphore最大并发数 -- 降低内存占用
     private final Semaphore messageSemaphore = new Semaphore(CONCURRENCY_LIMIT); // 控制消息处理并发数
     
 
