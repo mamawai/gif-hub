@@ -145,4 +145,14 @@ public interface GifProcessService {
      * @return 是否更新成功
      */
     boolean updateUserNickname(Long userId, String nickname);
+
+    /**
+     * 获取热门GIF列表（按浏览量排序，游标分页）
+     *
+     * @param pageSize 每页数量
+     * @param lastViewCount 上一页最后一条的浏览量
+     * @param lastId 上一页最后一条的ID
+     * @return 热门GIF列表
+     */
+    List<GifVO> getHotGifs(int pageSize, Integer lastViewCount, Long lastId);
 }

@@ -115,4 +115,17 @@
         AND status = 1
     </update>
 
+    <!-- 热门GIF查询（游标分页） -->
+    <select id="selectHotGifs" resultType="com.mawai.ghmbplus.model.Gif">
+        SELECT
+            <include refid="Base_Column_List" />
+        FROM gif
+        WHERE status = 1
+        <if test="lastViewCount != null and lastId != null">
+            AND (view_count, id) &lt; (#{lastViewCount}, #{lastId})
+        </if>
+        ORDER BY view_count DESC, id DESC
+        LIMIT #{pageSize}
+    </select>
+
 </mapper>

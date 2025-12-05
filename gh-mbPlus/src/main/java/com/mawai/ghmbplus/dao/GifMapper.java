@@ -66,4 +66,15 @@ public interface GifMapper extends BaseMapper<Gif> {
      * @return 更新的行数
      */
     int updateLikeCountBatchByMap(@Param("incrementMap") Map<Long, Long> incrementMap);
+
+    /**
+     * 查询热门GIF（游标分页）
+     * @param pageSize 每页数量
+     * @param lastViewCount 上一页最后一条的浏览量
+     * @param lastId 上一页最后一条的ID
+     * @return 热门GIF列表
+     */
+    List<Gif> selectHotGifs(@Param("pageSize") int pageSize,
+                            @Param("lastViewCount") Integer lastViewCount,
+                            @Param("lastId") Long lastId);
 }

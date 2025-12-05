@@ -347,5 +347,27 @@ public class GifController {
             return ApiResponse.error(500, "修改昵称失败：" + e.getMessage());
         }
     }
+
+    /**
+     * 获取热门GIF列表（按浏览量排序）
+     *
+     * @param pageSize 每页数量，默认20
+     * @param lastViewCount 上一页最后一条的浏览量（首次不传）
+     * @param lastId 上一页最后一条的ID（首次不传）
+     * @return 热门GIF列表
+     */
+    @Operation(summary = "获取热门GIF列表", description = "按浏览量排序，游标分页避免深分页问题")
+    @GetMapping("/hot")
+    public ApiResponse<List<GifVO>> hotGifs(
+            @RequestParam(value = "pageSize", defaultValue = "10") int pageSize,
+            @RequestParam(value = "lastViewCount", required = false) Integer lastViewCount,
+            @RequestParam(value = "lastId", required = false) Long lastId) {
+        try {
+            List<GifVO> gifs = gifProcessService.getHotGifs(pageSize, lastViewCount, lastId);
+            return ApiResponse.success(gifs);
+        } catch (Exception e) {
+            return ApiResponse.error(500, "获取热门GIF列表失败：" + e.getMessage());
+        }
+    }
     
 }

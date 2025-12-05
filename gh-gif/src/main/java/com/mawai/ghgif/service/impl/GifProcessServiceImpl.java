@@ -73,6 +73,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final MessageService messageService;
     private final UserService userService;
     private final GifAuditService gifAuditService;
+    private final com.mawai.ghmbplus.dao.GifMapper gifMapper;
     // 注入线程池
     private final Executor fileUploadExecutor;
     // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
@@ -1007,6 +1008,30 @@ public class GifProcessServiceImpl implements GifProcessService {
         }
         
         return updated;
+    }
+
+    /**
+     * 获取热门GIF列表（按浏览量排序，游标分页）
+     *
+     * @param pageSize 每页数量
+     * @param lastViewCount 上一页最后一条的浏览量
+     * @param lastId 上一页最后一条的ID
+     * @return 热门GIF列表
+     */
+    @Override
+    public List<GifVO> getHotGifs(int pageSize, Integer lastViewCount, Long lastId) {
+        if (pageSize <= 0 || pageSize > 100) pageSize = 10;
+        
+        List<Gif> gifs = gifMapper.selectHotGifs(pageSize, lastViewCount, lastId);
+        
+        List<GifVO> resList = gifs.stream()
+            .map(gifParamMapper::toGifVO)
+            .collect(Collectors.toList());
+        
+        // 合并所有实时数量
+        mergeAllRealTimeCounts(resList);
+        
+        return resList;
     }
 
 }

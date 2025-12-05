@@ -24,6 +24,7 @@ public class SaTokenConfig extends BaseSaTokenConfig {
     private final List<String> GIF_EXCLUDE_PATHS = Arrays.asList(
             "/gif/randomGifs",
             "/gif/randomGif",
+            "/gif/hot",
             "/gif/user/**",
             "/gif/record-download",
             "/tag/**",
