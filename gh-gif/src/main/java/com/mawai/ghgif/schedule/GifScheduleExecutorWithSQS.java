@@ -49,9 +49,9 @@ public class GifScheduleExecutorWithSQS {
     private final Semaphore dataFetchSemaphore = new Semaphore(DATA_FETCH_CONCURRENCY_LIMIT);
 
     // 同步间隔配置（分钟）
-    private static final int SYNC_INTERVAL_GROUP_1 = 9;  // 第一组：GIF 统计数据（下载、查看）
+    private static final int SYNC_INTERVAL_GROUP_1 = 10;  // 第一组：GIF 统计数据（下载、查看）
     private static final int SYNC_INTERVAL_GROUP_2 = 10; // 第二组：点赞相关数据（GIF点赞、用户点赞）
-    private static final int SYNC_INTERVAL_GROUP_3 = 11; // 第三组：评论相关数据（评论点赞、用户评论点赞）
+    private static final int SYNC_INTERVAL_GROUP_3 = 10; // 第三组：评论相关数据（评论点赞、用户评论点赞）
 
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String LIKE_COUNT_KEY = "gif:like:";
@@ -75,7 +75,7 @@ public class GifScheduleExecutorWithSQS {
      * 【第一组】定时同步 GIF 统计数据到数据库
      *
      * <p>
-     * 每 9 分钟执行一次，同步 GIF 下载次数和查看次数。
+     * 每 10 分钟执行一次，同步 GIF 下载次数和查看次数。
      * </p>
      *
      * <p>
@@ -93,7 +93,7 @@ public class GifScheduleExecutorWithSQS {
      * @see #syncDownloadCountToDatabase()
      * @see #syncViewCountsToDatabase()
      */
-    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_1 * 60 * 1000)
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_1 * 60 * 1000, initialDelay = 0)
     public void syncGifStatisticsGroup1() {
         log.info("【第一组】开始同步 GIF 统计数据（下载、查看）...");
 
@@ -137,7 +137,7 @@ public class GifScheduleExecutorWithSQS {
      * @see #syncLikeCountsToDatabase()
      * @see #syncUserLikesToDatabaseConcurrent()
      */
-    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_2 * 60 * 1000)
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_2 * 60 * 1000, initialDelay = 60 * 1000)
     public void syncLikeDataGroup2() {
         log.info("【第二组】开始同步点赞相关数据（GIF点赞、用户点赞）...");
 
@@ -180,7 +180,7 @@ public class GifScheduleExecutorWithSQS {
      * @see #syncCommentLikeCountsToDatabase()
      * @see #syncUserCommentLikesToDatabase()
      */
-    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_3 * 60 * 1000)
+    @Scheduled(fixedRate = SYNC_INTERVAL_GROUP_3 * 60 * 1000, initialDelay = 2 * 60 * 1000)
     public void syncCommentDataGroup3() {
         log.info("【第三组】开始同步评论相关数据（评论点赞、用户评论点赞）...");
 

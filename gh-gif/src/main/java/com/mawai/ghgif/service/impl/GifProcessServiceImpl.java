@@ -159,7 +159,7 @@ public class GifProcessServiceImpl implements GifProcessService {
     private static final String DOWNLOAD_COUNT_KEY = "gif:download:";
     private static final String VIEW_COUNT_KEY = "gif:view:"; // 查看次数缓存键
     private static final String TOTAL_GIF_COUNT_KEY = "gif:total:count"; // GIF总数缓存键
-    private static final int EXPIRE_TIME = 12; // 过期时间 要大于定时任务时间
+    private static final int EXPIRE_TIME = 13; // 过期时间 要大于定时任务时间
     private static final String GIF_DELETE_COUNT_KEY = "gif:delete:count"; // 删除计数器键
     private static final int DELETE_COUNT_THRESHOLD = 1; // 删除阈值
     private static final String DELETE_TASK_KEY = "gif:delete:task"; // 删除任务键

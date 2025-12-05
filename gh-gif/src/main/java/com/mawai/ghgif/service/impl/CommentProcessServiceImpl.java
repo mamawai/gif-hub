@@ -69,7 +69,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private static final String LOCK_COMMENT_ROOT_KEY = "lock:comment:root:"; // 评论根评论锁
     private static final String LOCK_COMMENT_CHILD_KEY = "lock:comment:child:"; // 评论子评论锁
     private static final String LOCK_COMMENT_HOT_ROOT_KEY = "lock:comment:hot:root:"; // 热门根评论锁
-    private static final int EXPIRE_TIME = 12; // Redis过期时间（分钟）
+    private static final int EXPIRE_TIME = 13; // Redis过期时间（分钟）
     private static final int ZSET_CACHE_TTL = 30; // ZSet缓存过期时间（分钟）
     private static final int COMMENT_DETAIL_CACHE_TTL = 60; // 评论详情缓存过期时间（分钟）
     private static final int HOT_COMMENT_CACHE_TTL = 60; // 热门评论缓存过期时间（分钟，较长）
