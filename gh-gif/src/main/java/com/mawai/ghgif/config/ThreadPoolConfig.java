@@ -145,44 +145,33 @@ public class ThreadPoolConfig {
         }
     }
     
-    /**
-     * 通用异步任务线程池
-     * 核心线程数1，最多5个线程，队列100，空闲60秒回收
-     */
-    @Bean("taskExecutor")
-    public Executor taskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数：1（平时只维护1个活跃线程）
-        executor.setCorePoolSize(1);
-        // 最大线程数：5（最多创建5个线程）
-        executor.setMaxPoolSize(5);
-        // 队列容量：100（任务入队）
-        executor.setQueueCapacity(100);
-        // 线程名前缀
-        executor.setThreadNamePrefix("async-task-");
-        // 线程空闲时间：60秒
-        executor.setKeepAliveSeconds(60);
-        // 允许核心线程超时回收
-        executor.setAllowCoreThreadTimeOut(true);
-        // 拒绝策略：由调用线程处理
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        // 等待所有任务结束后再关闭线程池
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        // 等待时间
-        executor.setAwaitTerminationSeconds(60);
-        // 初始化
-        executor.initialize();
-        return executor;
-    }
-
-    /**
-     * 邮件发送专用虚拟线程执行器
-     * 使用虚拟线程处理SMTP邮件发送的IO密集型操作
-     * 优势：每个邮件发送请求都能立即获得"线程"，降低发送延迟
-     */
-    @Bean("emailSendExecutor")
-    public Executor emailSendExecutor() {
-        // 邮件发送不需要传递登录信息，直接使用虚拟线程执行器
-        return Executors.newVirtualThreadPerTaskExecutor();
-    }
+//    /**
+//     * 通用异步任务线程池
+//     * 核心线程数1，最多5个线程，队列100，空闲60秒回收
+//     */
+//    @Bean("taskExecutor")
+//    public Executor taskExecutor() {
+//        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+//        // 核心线程数：1（平时只维护1个活跃线程）
+//        executor.setCorePoolSize(1);
+//        // 最大线程数：5（最多创建5个线程）
+//        executor.setMaxPoolSize(5);
+//        // 队列容量：100（任务入队）
+//        executor.setQueueCapacity(100);
+//        // 线程名前缀
+//        executor.setThreadNamePrefix("async-task-");
+//        // 线程空闲时间：60秒
+//        executor.setKeepAliveSeconds(60);
+//        // 允许核心线程超时回收
+//        executor.setAllowCoreThreadTimeOut(true);
+//        // 拒绝策略：由调用线程处理
+//        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+//        // 等待所有任务结束后再关闭线程池
+//        executor.setWaitForTasksToCompleteOnShutdown(true);
+//        // 等待时间
+//        executor.setAwaitTerminationSeconds(60);
+//        // 初始化
+//        executor.initialize();
+//        return executor;
+//    }
 } 

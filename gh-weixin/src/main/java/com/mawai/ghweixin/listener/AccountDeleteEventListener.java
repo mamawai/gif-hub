@@ -35,7 +35,7 @@ public class AccountDeleteEventListener {
     private final UserMapper userMapper;
     private final UserNicknameCacheService userNicknameCacheService;
 
-    @Async("taskExecutor")
+    @Async("wxVirtualExecutor")
     @EventListener
     @Transactional(rollbackFor = Exception.class)
     public void handleAccountDelete(AccountDeleteEvent event) {

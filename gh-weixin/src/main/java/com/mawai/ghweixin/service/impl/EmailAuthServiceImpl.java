@@ -25,6 +25,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -122,7 +123,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
      * @param email 收件人邮箱
      * @param verificationCode 验证码
      */
-    @Async("emailSendExecutor")
+    @Async("wxVirtualExecutor")
     public void sendEmailAsync(String email, String verificationCode) {
 
         String subject = "GIF-HUB 验证码";
