@@ -1324,7 +1324,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         for (CommentVO vo : comments) {
             // 如果评论vo nick是空的才赋值
-            if (vo.getNickname().isBlank()) {
+            if (vo.getNickname() == null || vo.getNickname().isBlank()) {
                 String nickname = nicknameMap.get(vo.getUserId());
                 if (nickname == null) {
                     // 如果用户注销，但是缓存可能还有这个用户的detail信息
@@ -1344,7 +1344,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         Set<Long> allUserIds = new HashSet<>();
         for (CommentVO vo : comments) {
             // 这个可能没有
-            if (vo.getNickname().isBlank()) {
+            if (vo.getNickname() == null || vo.getNickname().isBlank()) {
                 allUserIds.add(vo.getUserId());
             }
             // 这个是一定没有，所以parentUserId不为空就add
@@ -1361,7 +1361,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         
         for (CommentVO vo : comments) {
             // 没有才填充
-            if (vo.getNickname().isBlank()) {
+            if (vo.getNickname() == null || vo.getNickname().isBlank()) {
                 String nickname = nicknameMap.get(vo.getUserId());
                 vo.setNickname(nickname != null ? nickname : "用户已注销");
             }
