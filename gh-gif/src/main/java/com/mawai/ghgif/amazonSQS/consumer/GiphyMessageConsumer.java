@@ -128,6 +128,8 @@ public class GiphyMessageConsumer implements MessageConsumer {
         Gif gif = new Gif();
         gif.setUserId(0L); // 硬编码用户ID，表示作者为 giphy
         gif.setGiphyId(giphyId);
+        gif.setHeight(giphyDTO.getHeight());
+        gif.setWidth(giphyDTO.getWidth());
         gif.setTitle(giphyDTO.getTitle());
         gif.setSource(giphyDTO.getSource());
         gif.setStatus((byte) 1);

@@ -1,6 +1,7 @@
 package com.mawai.ghgif.vo;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 /**
@@ -29,4 +30,23 @@ public class GiphyGifVO {
      * GIF 标题
      */
     private String title;
+
+    /**
+     * 原始图片高度
+     */
+    @JsonProperty("images")
+    private Images images;
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Images {
+        private Original original;
+        
+        @Data
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Original {
+            private String height;
+            private String width;
+        }
+    }
 }

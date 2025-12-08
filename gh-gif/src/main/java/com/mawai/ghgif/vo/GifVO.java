@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 public class GifVO {
     private Long id; // GIF ID
     private String giphyId; // Giphy ID
+    private String height; // 高度
+    private String width; // 宽度
     private String title; // 标题
     private String description; // 描述
     private String source; // 来源

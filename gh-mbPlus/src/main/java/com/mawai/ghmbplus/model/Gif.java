@@ -76,6 +76,20 @@ public class Gif implements Serializable {
     private String giphyId;
 
     /**
+     * GIF图片高度
+     */
+    @TableField("height")
+    @Schema(description = "GIF图片高度")
+    private String height;
+
+    /**
+     * GIF图片宽度
+     */
+    @TableField("width")
+    @Schema(description = "GIF图片宽度")
+    private String width;
+
+    /**
      * 来源
      */
     @TableField("source")

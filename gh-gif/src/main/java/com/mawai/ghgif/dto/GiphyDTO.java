@@ -25,4 +25,10 @@ public class GiphyDTO {
 
     @Schema(description = "标题", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private String title;
+
+    @Schema(description = "图片高度", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private String  height;
+
+    @Schema(description = "图片宽度", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private String width;
 }
