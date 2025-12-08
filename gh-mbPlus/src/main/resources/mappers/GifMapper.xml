@@ -4,7 +4,7 @@
 
     <sql id="Base_Column_List">
         id, user_id, random_number, title, description,
-        giphy_id, source, giphy_username, status, view_count,
+        giphy_id, height, width, source, giphy_username, status, view_count,
         like_count, download_count, created_at
     </sql>
 
@@ -34,6 +34,8 @@
             title,
             description,
             giphy_id,
+            height,
+            width,
             source,
             giphy_username,
             status,
@@ -46,6 +48,8 @@
             #{title},
             #{description},
             #{giphyId},
+            #{height},
+            #{width},
             #{source},
             #{giphyUsername},
             #{status},
