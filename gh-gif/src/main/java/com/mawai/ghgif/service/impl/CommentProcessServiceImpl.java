@@ -258,20 +258,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         if (comments.isEmpty()) {
             return;
         }
-        
-        // 1. 批量查询子评论数量
-        List<Long> rootCommentIds = comments.stream()
-                .map(vo -> Long.parseLong(vo.getId()))
-                .toList();
-        List<ChildCountBO> childCountBoList = commentMapper.countChildCommentsBatch(rootCommentIds);
-        // toMap 查询速度快
-        Map<Long, Integer> childCountMap = childCountBoList.stream()
-                .collect(Collectors.toMap(ChildCountBO::getRootCommentId, ChildCountBO::getChildCount));
-        
-        for (CommentVO vo : comments) {
-            vo.setChildCount(childCountMap.get(Long.parseLong(vo.getId())));
-            vo.setChildren(null); // 懒加载
-        }
+
+        // 填充昵称
+        fillNicknames(comments);
         
         // 2. 实时查询点赞状态
         if (userId != null) {
@@ -292,12 +281,9 @@ public class CommentProcessServiceImpl implements CommentProcessService {
         if (comments.isEmpty()) {
             return;
         }
-        
-        // 子评论不再有子评论
-        for (CommentVO vo : comments) {
-            vo.setChildCount(0);
-            vo.setChildren(null);
-        }
+
+        // 填充昵称
+        fillNicknamesForChildComments(comments);
         
         // 实时查询点赞状态
         if (userId != null) {
@@ -751,7 +737,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @param commentIds 评论ID列表
      */
     private List<CommentVO> batchGetRootCommentsByIds(List<String> commentIds) {
-        List<CommentVO> result = batchGetCommentsByIdsWithCache(
+        return batchGetCommentsByIdsWithCache(
             commentIds,
             commentMapper::selectRootCommentsByIds,
             CommentDetailCacheBO::fromRoot,
@@ -759,9 +745,6 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             RootCommentBO::getId,
             "根评论"
         );
-        // 填充昵称
-        fillNicknames(result);
-        return result;
     }
     
     /**
@@ -770,7 +753,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @param commentIds 评论ID列表
      */
     private List<CommentVO> batchGetChildCommentsByIds(List<String> commentIds) {
-        List<CommentVO> result = batchGetCommentsByIdsWithCache(
+        return batchGetCommentsByIdsWithCache(
             commentIds,
             commentMapper::selectChildCommentsByIds,
             CommentDetailCacheBO::fromChild,
@@ -778,9 +761,6 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             ChildCommentBO::getId,
             "子评论"
         );
-        // 填充昵称
-        fillNicknamesForChildComments(result);
-        return result;
     }
     
     /**
@@ -1318,24 +1298,40 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @param comments 根评论列表
      */
     private void fillNicknames(List<CommentVO> comments) {
-        if (comments.isEmpty()) {
-            return;
-        }
-        
-        List<Long> userIds = comments.stream()
-                .map(CommentVO::getUserId)
-                .distinct()
+
+        // 批量查询子评论数量
+        List<Long> rootCommentIds = comments.stream()
+                .map(vo -> Long.parseLong(vo.getId()))
                 .toList();
-        
-        Map<Long, String> nicknameMap = userNicknameCacheService.batchGetNicknames(userIds);
+        List<ChildCountBO> childCountBoList = commentMapper.countChildCommentsBatch(rootCommentIds);
+        // toMap 查询速度快
+        Map<Long, Integer> childCountMap = childCountBoList.stream()
+                .collect(Collectors.toMap(ChildCountBO::getRootCommentId, ChildCountBO::getChildCount));
+
+        // 直接查库时是有昵称的，这里直接使用，就不用查询了
+        Set<Long> set = new HashSet<>();
+        for (CommentVO vo : comments) {
+            String nick = vo.getNickname();
+            if (nick == null || nick.isBlank()) {
+                set.add(vo.getUserId());
+            }
+            // 在这里一起构建了 -- 减少一次遍历
+            vo.setChildCount(childCountMap.get(Long.parseLong(vo.getId())));
+            vo.setChildren(null); // 懒加载
+        }
+
+        Map<Long, String> nicknameMap = userNicknameCacheService.batchGetNicknames(new ArrayList<>(set));
         
         for (CommentVO vo : comments) {
-            String nickname = nicknameMap.get(vo.getUserId());
-            if (nickname == null) {
-                // 如果用户注销，但是缓存可能还有这个用户的detail信息
-                nickname = "用户已注销";
+            // 如果评论vo nick是空的才赋值
+            if (vo.getNickname().isBlank()) {
+                String nickname = nicknameMap.get(vo.getUserId());
+                if (nickname == null) {
+                    // 如果用户注销，但是缓存可能还有这个用户的detail信息
+                    nickname = "用户已注销";
+                }
+                vo.setNickname(nickname);
             }
-            vo.setNickname(nickname);
         }
     }
     
@@ -1345,23 +1341,30 @@ public class CommentProcessServiceImpl implements CommentProcessService {
      * @param comments 子评论列表
      */
     private void fillNicknamesForChildComments(List<CommentVO> comments) {
-        if (comments.isEmpty()) {
-            return;
-        }
-        
         Set<Long> allUserIds = new HashSet<>();
         for (CommentVO vo : comments) {
-            allUserIds.add(vo.getUserId());
+            // 这个可能没有
+            if (vo.getNickname().isBlank()) {
+                allUserIds.add(vo.getUserId());
+            }
+            // 这个是一定没有，所以parentUserId不为空就add
             if (vo.getParentUserId() != null) {
                 allUserIds.add(vo.getParentUserId());
             }
+
+            // 子评论不再有子评论 -- 减少一次遍历
+            vo.setChildCount(0);
+            vo.setChildren(null);
         }
         
         Map<Long, String> nicknameMap = userNicknameCacheService.batchGetNicknames(new ArrayList<>(allUserIds));
         
         for (CommentVO vo : comments) {
-            String nickname = nicknameMap.get(vo.getUserId());
-            vo.setNickname(nickname != null ? nickname : "用户已注销");
+            // 没有才填充
+            if (vo.getNickname().isBlank()) {
+                String nickname = nicknameMap.get(vo.getUserId());
+                vo.setNickname(nickname != null ? nickname : "用户已注销");
+            }
             
             if (vo.getParentUserId() != null) {
                 String parentNickname = nicknameMap.get(vo.getParentUserId());
