@@ -155,4 +155,13 @@ public interface GifProcessService {
      * @return 热门GIF列表
      */
     List<GifVO> getHotGifs(int pageSize, Integer lastViewCount, Long lastId);
+
+    /**
+     * 获取最新GIF列表（游标分页）
+     *
+     * @param lastId 上一批最后一个GIF的ID，首次查询传null
+     * @param pageSize 每页数量
+     * @return 最新GIF列表
+     */
+    List<GifVO> getLatestGifs(Long lastId, Integer pageSize);
 }

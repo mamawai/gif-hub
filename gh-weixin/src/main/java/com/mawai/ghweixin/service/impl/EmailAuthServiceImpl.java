@@ -9,12 +9,13 @@ import com.mawai.ghmbplus.dao.UserCategoryMapper;
 import com.mawai.ghmbplus.dao.UserMapper;
 import com.mawai.ghmbplus.model.User;
 import com.mawai.ghmbplus.model.UserCategory;
-import com.mawai.ghweixin.dto.UserInfoDTO;
+import com.mawai.ghweixin.vo.UserInfoVO;
 import com.mawai.ghweixin.event.AccountDeleteEvent;
 import com.mawai.ghweixin.service.EmailAuthService;
 import com.mawai.ghweixin.strategy.EmailStrategy;
 import com.mawai.ghweixin.utils.PasswordEncoder;
 import com.mawai.ghweixin.utils.RsaEncryptUtil;
+import com.mawai.ghweixin.vo.LoginResultVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -243,6 +244,91 @@ public class EmailAuthServiceImpl implements EmailAuthService {
     }
 
     /**
+     * Web端发送验证码
+     */
+    @Override
+    public boolean sendWebVerificationCode(String email) {
+        try {
+            // 1. 检查邮箱是否在黑名单中（24小时内注销的邮箱）
+            String blacklistKey = DELETED_EMAIL_BLACKLIST_PREFIX + email;
+            if (cacheService.get(blacklistKey) != null) {
+                throw new RuntimeException("该邮箱已注销，24小时内无法重新注册");
+            }
+
+            // 2. 查询是否有这个邮箱用户
+            QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("email", email);
+            User user = userMapper.selectOne(queryWrapper);
+            if (user == null) {
+                throw new RuntimeException("邮箱不存在，请前往小程序注册");
+            }
+
+            // 3. 校验redis中是否存在验证码
+            String key = CODE_KEY_PREFIX + email;
+            String storedCode = cacheService.get(key);
+            if (storedCode != null) {
+                throw new RuntimeException("验证码已发送，请稍后再试");
+            }
+
+            // 4. 生成6位随机数字验证码
+            String verificationCode = generateVerificationCode();
+            
+            // 5. 异步发送邮件
+            sendEmailAsync(email, verificationCode);
+            
+            // 6. 将验证码存入Redis，设置过期时间
+            cacheService.set(key, verificationCode, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
+            
+            return true;
+        } catch (Exception e) {
+            log.error("Web端发送验证码失败: {}", e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Web端登录（支持密码和验证码两种方式）
+     */
+    @Override
+    public LoginResultVO webLogin(String email, String password, String verificationCode) {
+        // 查询用户
+        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("email", email);
+        User user = userMapper.selectOne(queryWrapper);
+        
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        
+        // 根据传入参数判断登录方式
+        if (password != null) {
+            // 密码登录
+            try {
+                if (!passwordEncoder.matches(RsaEncryptUtil.decrypt(password), user.getPassword())) {
+                    throw new RuntimeException("密码错误");
+                }
+            } catch (Exception e) {
+                log.error("密码验证失败: {}", e.getMessage(), e);
+                throw new RuntimeException("密码错误");
+            }
+        } else if (verificationCode != null) {
+            // 验证码登录
+            if (isVerifyFail(email, verificationCode)) {
+                throw new RuntimeException("验证码错误或已过期");
+            }
+        } else {
+            throw new RuntimeException("请提供密码或验证码");
+        }
+        
+        // 登录
+        StpUtil.login(user.getId());
+        
+        return LoginResultVO.builder()
+                .token(StpUtil.getTokenValue())
+                .build();
+    }
+
+    /**
      * 邮箱密码登录 -- 注册后登录
      */
     @Override
@@ -331,7 +417,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
      * 检查token并获取用户信息
      */
     @Override
-    public UserInfoDTO checkAndGet() {
+    public UserInfoVO checkAndGet() {
         // 检查是否已登录 -- check token
         if (!StpUtil.isLogin()) {
             throw new RuntimeException("未登录");
@@ -345,7 +431,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             throw new RuntimeException("用户不存在");
         }
 
-        return UserInfoDTO.builder()
+        return UserInfoVO.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())

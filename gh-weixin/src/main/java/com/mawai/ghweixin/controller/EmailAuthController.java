@@ -4,6 +4,8 @@ import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.service.EmailAuthService;
+import com.mawai.ghweixin.vo.LoginResultVO;
+import com.mawai.ghweixin.vo.UserInfoVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -68,6 +70,51 @@ public class EmailAuthController {
     }
 
     /**
+     * Web端发送验证码
+     *
+     * @param email 邮箱地址
+     * @return 发送结果
+     */
+    @Operation(summary = "Web端发送验证码", description = "Web端向已注册邮箱发送验证码")
+    @PostMapping("/web/code")
+    public ApiResponse<Boolean> sendWebVerificationCode(@RequestParam String email) {
+        try {
+            boolean result = emailAuthService.sendWebVerificationCode(email);
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("Web端发送验证码失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, e.getMessage());
+        }
+    }
+
+    /**
+     * Web端登录（支持密码和验证码两种方式）
+     *
+     * @param loginDTO 登录信息
+     * @return 登录结果（包含token）
+     */
+    @Operation(summary = "Web端登录", description = "Web端通过邮箱+密码或邮箱+验证码登录")
+    @PostMapping("/web/login")
+    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO) {
+        try {
+            LoginResultVO result;
+            if (loginDTO.getLoginType() == 1) {
+                // 密码登录
+                result = emailAuthService.webLogin(loginDTO.getEmail(), loginDTO.getPassword(), null);
+            } else if (loginDTO.getLoginType() == 2) {
+                // 验证码登录
+                result = emailAuthService.webLogin(loginDTO.getEmail(), null, loginDTO.getVerificationCode());
+            } else {
+                return ApiResponse.error(400, "不支持的登录类型");
+            }
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("Web端登录失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, "登录失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 登录
      *
      * @param loginDTO 登录信息
@@ -117,9 +164,9 @@ public class EmailAuthController {
      */
     @Operation(summary = "检查token并获取用户信息", description = "检查token并获取当前登录用户信息")
     @GetMapping("/checkAndGet")
-    public ApiResponse<UserInfoDTO> checkAndGet() {
+    public ApiResponse<UserInfoVO> checkAndGet() {
         try {
-            UserInfoDTO result = emailAuthService.checkAndGet();
+            UserInfoVO result = emailAuthService.checkAndGet();
             return ApiResponse.success(result);
         } catch (Exception e) {
             log.error("获取用户信息失败: {}", e.getMessage(), e);

@@ -369,5 +369,25 @@ public class GifController {
             return ApiResponse.error(500, "获取热门GIF列表失败：" + e.getMessage());
         }
     }
+
+    /**
+     * 获取最新GIF列表（游标分页）
+     *
+     * @param pageSize 每页数量，默认10
+     * @param lastId 上一页最后一条的ID（首次不传）
+     * @return 最新GIF列表
+     */
+    @Operation(summary = "获取最新GIF列表", description = "按ID倒序排序，游标分页避免数据不一致")
+    @GetMapping("/latest")
+    public ApiResponse<List<GifVO>> latestGifs(
+            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize,
+            @RequestParam(value = "lastId", required = false) Long lastId) {
+        try {
+            List<GifVO> gifs = gifProcessService.getLatestGifs(lastId, pageSize);
+            return ApiResponse.success(gifs);
+        } catch (Exception e) {
+            return ApiResponse.error(500, "获取最新GIF列表失败：" + e.getMessage());
+        }
+    }
     
 }

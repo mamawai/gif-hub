@@ -61,6 +61,8 @@ public class UserCateLikeServiceImpl implements UserCateLikeService {
                         .eq(UserCategory::getId, categoryId)
                         .eq(UserCategory::getUserId, userId)
             );
+
+            //TODO 还要移除分类下所有的userLike
         } catch (Exception e) {
             log.error("删除用户分类失败", e);
             return false;

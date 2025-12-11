@@ -82,7 +82,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <!-- 将最终的 jar 包输出到项目根目录的 target 目录 -->
-                    <outputDirectory>../target</outputDirectory>
+<!--                    <outputDirectory>../target</outputDirectory>-->
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

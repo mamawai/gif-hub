@@ -1034,4 +1034,35 @@ public class GifProcessServiceImpl implements GifProcessService {
         return resList;
     }
 
+    /**
+     * 获取最新GIF列表（游标分页）
+     *
+     * @param lastId 上一批最后一个GIF的ID，首次查询传null
+     * @param pageSize 每页数量
+     * @return 最新GIF列表
+     */
+    @Override
+    public List<GifVO> getLatestGifs(Long lastId, Integer pageSize) {
+        if (pageSize == null || pageSize <= 0 || pageSize > 100) pageSize = 10;
+        
+        LambdaQueryWrapper<Gif> wrapper = new LambdaQueryWrapper<Gif>()
+                .eq(Gif::getStatus, 1);
+        
+        if (lastId != null) {
+            wrapper.lt(Gif::getId, lastId);
+        }
+        
+        List<Gif> gifs = gifService.list(wrapper
+                .orderByDesc(Gif::getId)
+                .last("LIMIT " + pageSize));
+        
+        List<GifVO> resList = gifs.stream()
+                .map(gifParamMapper::toGifVO)
+                .collect(Collectors.toList());
+        
+        mergeAllRealTimeCounts(resList);
+        
+        return resList;
+    }
+
 }

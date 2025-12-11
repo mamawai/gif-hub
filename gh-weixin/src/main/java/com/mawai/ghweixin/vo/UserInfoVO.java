@@ -1,4 +1,4 @@
-package com.mawai.ghweixin.dto;
+package com.mawai.ghweixin.vo;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class UserInfoDTO {
+public class UserInfoVO {
     
     /**
      * 用户ID
