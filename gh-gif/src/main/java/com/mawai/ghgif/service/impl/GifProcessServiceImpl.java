@@ -18,7 +18,9 @@ import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.service.UserNicknameCacheService;
 import com.mawai.ghgif.event.GifDeleteEvent;
 import com.mawai.ghgif.service.GifProcessService;
+import com.mawai.ghgif.service.NotificationProcessService;
 import com.mawai.ghgif.vo.GifVO;
+import com.mawai.ghgif.vo.UserLikeVO;
 import com.mawai.ghmbplus.model.*;
 import com.mawai.ghmbplus.service.*;
 
@@ -74,12 +76,18 @@ public class GifProcessServiceImpl implements GifProcessService {
     private final UserService userService;
     private final GifAuditService gifAuditService;
     private final com.mawai.ghmbplus.dao.GifMapper gifMapper;
+    private final NotificationProcessService notificationProcessService;
     // 注入线程池
     private final Executor fileUploadExecutor;
     // 文件上传并发控制 - 限制同时上传到 R2 的文件数量
     // 避免批量上传时触发 R2 API 限流或占用过多网络带宽
     private static final int FILE_UPLOAD_CONCURRENCY_LIMIT = 30;
     private final Semaphore fileUploadSemaphore = new Semaphore(FILE_UPLOAD_CONCURRENCY_LIMIT);
+    
+    // SQS 发送并发控制 - 限制同时发送到 SQS 的请求数量
+    // 避免高并发点赞时触发 SQS API 限流或占用过多网络资源
+    private static final int SQS_SEND_CONCURRENCY_LIMIT = 60;
+    private final Semaphore sqsSendSemaphore = new Semaphore(SQS_SEND_CONCURRENCY_LIMIT);
 
     // S3客户端实例
     private S3Client s3Client;
@@ -391,6 +399,36 @@ public class GifProcessServiceImpl implements GifProcessService {
                 cacheService.likeOperationOptimized(countKey, likeHashKey, dislikeSetKey, fileId, userLikeCategoryId, EXPIRE_TIME, TimeUnit.MINUTES);
                 
                 log.info("用户{}对GIF{}点赞成功，分类ID: {}", userId, fileId, userLikeCategoryId);
+
+                // 异步发送点赞通知到 SQS（带30分钟去重锁 + 并发控制）
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        // 获取信号量，控制 SQS 发送并发量
+                        // 如果获取不到，虚拟线程会阻塞等待（虚拟线程阻塞不会占用平台线程）
+                        sqsSendSemaphore.acquire();
+                        try {
+                            Gif gif = gifService.getById(fileId);
+                            if (gif != null && gif.getUserId() != null) {
+                                // 发送到 SQS，由 NotificationConsumer 异步处理落库+推送
+                                notificationProcessService.sendGifLikeNotification(
+                                        gif.getUserId(),  // 接收者：GIF作者
+                                        userId,           // 触发者：点赞用户
+                                        Long.parseLong(fileId),
+                                        gif.getTitle()
+                                );
+                            }
+                        } finally {
+                            // 释放信号量
+                            sqsSendSemaphore.release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        log.warn("等待SQS发送信号量时被中断: fileId={}, userId={}", fileId, userId);
+                    } catch (Exception e) {
+                        log.error("异步发送点赞通知失败: fileId={}, userId={}, error={}", fileId, userId, e.getMessage(), e);
+                        // 通知发送失败不影响点赞操作
+                    }
+                }, fileUploadExecutor); // 复用虚拟线程池
             } else {
                 // 取消点赞操作：检查like hash，有则删除；没有则在dislike set中标记
                 cacheService.dislikeOperationOptimized(countKey, likeHashKey, dislikeSetKey, fileId, EXPIRE_TIME, TimeUnit.MINUTES);
@@ -550,7 +588,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @return 用户喜欢列表
      */
     @Override
-    public List<GifVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize) {
+    public List<UserLikeVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize) {
         try {
             // 1. 获取用户不喜欢的gif ID集合（用于在数据库查询时排除）
             Set<String> dislikedGifIds = getDislikedGifIds(userId);
@@ -559,25 +597,25 @@ public class GifProcessServiceImpl implements GifProcessService {
             Map<String, Long> cacheGifIdsMap = getCacheGifIds(userId);
             
             // 3. 从数据库中查询指定分类的gif ID集合（排除dislike的）
-            Set<Long> dbGifIds = getDbGifIdsByCategory(userId, categoryId, dislikedGifIds);
+            Map<Long, LocalDateTime> dbGifIdsCreatedAtMap = getDbGifIdsByCategory(userId, categoryId, dislikedGifIds);
 
             // 4.遍历cacheGifIdsMap，如果key在dbGifIds中并且value不等于categoryId，则删除dbGifIds中的value
             for (Map.Entry<String, Long> entry : cacheGifIdsMap.entrySet()) {
-                if (dbGifIds.contains(Long.parseLong(entry.getKey())) && !entry.getValue().equals(categoryId)) {
-                    dbGifIds.remove(Long.parseLong(entry.getKey()));
+                if (dbGifIdsCreatedAtMap.containsKey(Long.parseLong(entry.getKey())) && !entry.getValue().equals(categoryId)) {
+                    dbGifIdsCreatedAtMap.remove(Long.parseLong(entry.getKey()));
                 } else if (entry.getValue().equals(categoryId)) {
                     // 如果value等于categoryId，则添加到dbGifIds中 Set去重
-                    dbGifIds.add(Long.parseLong(entry.getKey()));
+                    dbGifIdsCreatedAtMap.put(Long.parseLong(entry.getKey()), null);
                 }
             }
             
-            if (dbGifIds.isEmpty()) {
+            if (dbGifIdsCreatedAtMap.isEmpty()) {
                 log.info("用户{}分类{}下没有喜欢的GIF", userId, categoryId);
                 return new ArrayList<>();
             }
             
             // 4. 转换为List并排序（按ID倒序，最新的在前面）
-            List<Long> sortedGifIds = dbGifIds.stream()
+            List<Long> sortedGifIds = dbGifIdsCreatedAtMap.keySet().stream()
                     .sorted(Collections.reverseOrder())
                     .toList();
             
@@ -603,8 +641,11 @@ public class GifProcessServiceImpl implements GifProcessService {
             }
             // 合并所有实时数量
             mergeAllRealTimeCounts(resList);
-            
-            return resList;
+
+            // toUserLikeVO
+            return resList.stream()
+                    .map(vo -> new UserLikeVO(vo, dbGifIdsCreatedAtMap.get(vo.getId())))
+                    .collect(Collectors.toList());
         } catch (Exception e) {
             log.error("获取用户{}分类{}喜欢列表失败: {}", userId, categoryId, e.getMessage(), e);
             return new ArrayList<>();
@@ -659,12 +700,12 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @param dislikedGifIds 用户不喜欢的gif ID集合
      * @return gif ID集合
      */
-    private Set<Long> getDbGifIdsByCategory(Long userId, Long categoryId, Set<String> dislikedGifIds) {
+    private Map<Long, LocalDateTime> getDbGifIdsByCategory(Long userId, Long categoryId, Set<String> dislikedGifIds) {
         try {
             LambdaQueryWrapper<UserLike> queryWrapper = new LambdaQueryWrapper<>();
             queryWrapper.eq(UserLike::getUserId, userId)
-                       .eq(UserLike::getUserLikeCategoryId, categoryId)
-                       .select(UserLike::getGifId); // 只查询gif ID字段
+                    .eq(UserLike::getUserLikeCategoryId, categoryId)
+                    .select(UserLike::getGifId, UserLike::getCreatedAt); // 查询gif ID字段和创建时间字段
             
             // 查询用户喜欢列表
             List<UserLike> userLikes = userLikeService.list(queryWrapper);
@@ -678,18 +719,16 @@ public class GifProcessServiceImpl implements GifProcessService {
                 
                 // 排除不喜欢的gif ID 并返回
                 return userLikes.stream()
-                    .map(UserLike::getGifId)
-                    .filter(gifId -> !dislikedGifIdsLong.contains(gifId)) // 避免了NOT IN
-                    .collect(Collectors.toSet());
+                        .filter(userLike -> !dislikedGifIdsLong.contains(userLike.getGifId())) // 避免了NOT IN
+                        .collect(Collectors.toMap(UserLike::getGifId, UserLike::getCreatedAt));
             }
             
             // 返回用户喜欢列表
             return userLikes.stream()
-                    .map(UserLike::getGifId)
-                    .collect(Collectors.toSet());
+                    .collect(Collectors.toMap(UserLike::getGifId, UserLike::getCreatedAt));
         } catch (Exception e) {
             log.error("从数据库获取用户{}分类{}喜欢列表失败: {}", userId, categoryId, e.getMessage(), e);
-            return new HashSet<>();
+            return new HashMap<>();
         }
     }
     

@@ -1,6 +1,7 @@
 package com.mawai.ghgif.service;
 
 import com.mawai.ghgif.vo.GifVO;
+import com.mawai.ghgif.vo.UserLikeVO;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
 
@@ -78,7 +79,7 @@ public interface GifProcessService {
      * @param pageSize 每页数量
      * @return 用户喜欢的GIF列表
      */
-    List<GifVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize);
+    List<UserLikeVO> listUserLikes(Long userId, Long categoryId, Integer pageNum, Integer pageSize);
 
     /**
      * 获取GIF总数

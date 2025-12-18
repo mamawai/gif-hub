@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 /**
  * 用户信息数据传输对象
  */
@@ -28,4 +30,9 @@ public class UserInfoVO {
      * 昵称
      */
     private String nickname;
+
+    /**
+     * 创建时间
+     */
+    private LocalDateTime createTime;
 }

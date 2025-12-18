@@ -20,8 +20,10 @@ public enum MessageType {
     COMMENT_LIKES_MESSAGE("commentLikes"),
     
     COMMENT_MESSAGE("comment"),
-    
-    GIPHY_MESSAGE("giphy");
+
+    GIPHY_MESSAGE("giphy"),
+
+    NOTIFICATION_MESSAGE("notification");
 
     private final String value;
 

@@ -22,6 +22,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+
+        <!-- WebSocket支持 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
         <!-- https://mvnrepository.com/artifact/de.codecentric/spring-boot-admin-starter-client -->
 <!--        <dependency>-->
 <!--            <groupId>de.codecentric</groupId>-->

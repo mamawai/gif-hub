@@ -13,6 +13,7 @@ import com.mawai.ghgif.dto.CommentDTO;
 import com.mawai.ghgif.modelMapper.CommentParamMapper;
 import com.mawai.ghgif.service.CommentProcessService;
 import com.mawai.ghgif.service.ModerationService;
+import com.mawai.ghgif.service.NotificationProcessService;
 import com.mawai.ghgif.vo.CommentVO;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
 import com.mawai.ghmbplus.dao.CommentMapper;
@@ -37,6 +38,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -58,6 +61,10 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private final UserNicknameCacheService userNicknameCacheService;
     private final MessageService messageService;
     private final ModerationService moderationService;
+    private final NotificationProcessService notificationProcessService;
+    private final com.mawai.ghmbplus.service.GifService gifService;
+    // 注入虚拟线程池
+    private final Executor fileUploadExecutor;
     
     private static final String COMMENT_LIKE_COUNT_KEY = "comment:like:"; // 评论点赞数缓存key
     private static final String USER_COMMENT_LIKE_KEY = "user:comment:like:"; // 用户评论点赞缓存key
@@ -76,6 +83,11 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private static final int LOCK_WAIT_TIME = 5; // 分布式锁等待时间（秒）
     private static final int CACHE_RETRY_TIMES = 3; // 等待缓存重试次数
     private static final int CACHE_RETRY_INTERVAL = 50; // 每次重试间隔（毫秒）
+    
+    // SQS 发送并发控制 - 限制评论通知同时发送到 SQS 的请求数量
+    // 评论通知量相对较小，设置为 30 即可
+    private static final int COMMENT_NOTIFICATION_SQS_LIMIT = 30;
+    private final Semaphore commentNotificationSemaphore = new Semaphore(COMMENT_NOTIFICATION_SQS_LIMIT);
 
     @Value("${aws.sqs.base-queue-url}")
     private String SQS_QUEUE_URL;
@@ -118,6 +130,8 @@ public class CommentProcessServiceImpl implements CommentProcessService {
             );
             log.info("评论消息发送成功: userId={}, commentId={}, gifId={}",
                     userId, commentMessage.getCommentId(), commentDTO.getGifId());
+
+            // 评论通知由CommentMessageConsumer处理,这里不需要发送
         } catch (Exception e) {
             log.error("评论消息发送失败: userId={}, commentId={}, gifId={}, error={}",
                     userId, commentMessage.getCommentId(), commentDTO.getGifId(), e.getMessage(), e);
@@ -318,6 +332,37 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                 // 点赞操作：检查dislike set，有则删除；无论如何都在like set中设置
                 cacheService.commentLikeOperation(countKey, likeSetKey, dislikeSetKey, commentId, EXPIRE_TIME, TimeUnit.MINUTES);
                 log.info("用户{}对评论{}点赞成功", userId, commentId);
+
+                // 异步发送点赞评论通知到 SQS（带30分钟去重锁 + 并发控制）
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        // 获取信号量，控制 SQS 发送并发量（最多30个并发）
+                        // 如果获取不到，虚拟线程会阻塞等待（虚拟线程阻塞不会占用平台线程）
+                        commentNotificationSemaphore.acquire();
+                        try {
+                            Comment comment = commentService.getById(commentId);
+                            if (comment != null && comment.getUserId() != null) {
+                                // 发送到 SQS，由 NotificationConsumer 异步处理落库+推送
+                                notificationProcessService.sendCommentLikeNotification(
+                                        comment.getUserId(),  // 接收者：评论作者
+                                        userId,               // 触发者：点赞用户
+                                        Long.parseLong(commentId),
+                                        comment.getContent()
+                                );
+                            }
+                        } finally {
+                            // 释放信号量
+                            commentNotificationSemaphore.release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        log.warn("等待评论通知SQS发送信号量时被中断: commentId={}, userId={}", commentId, userId);
+                    } catch (Exception e) {
+                        log.error("异步发送点赞评论通知失败: commentId={}, userId={}, error={}", 
+                                commentId, userId, e.getMessage(), e);
+                        // 通知发送失败不影响点赞操作
+                    }
+                }, fileUploadExecutor); // 复用虚拟线程池
             } else {
                 // 取消点赞操作：检查like set，有则删除；没有则在dislike set中标记
                 cacheService.commentDislikeOperation(countKey, likeSetKey, dislikeSetKey, commentId, EXPIRE_TIME, TimeUnit.MINUTES);

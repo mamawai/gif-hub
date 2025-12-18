@@ -435,6 +435,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .nickname(user.getNickname())
+                .createTime(user.getCreatedAt())
                 .build();
     }
 

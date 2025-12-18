@@ -10,6 +10,7 @@ import com.mawai.ghgif.exception.RateLimitException;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.ValidationService;
 import com.mawai.ghgif.vo.GifVO;
+import com.mawai.ghgif.vo.UserLikeVO;
 import com.mawai.ghmbplus.service.UserCategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -189,7 +190,7 @@ public class GifController {
      */
     @Operation(summary = "按分类分页获取用户喜欢列表", description = "按分类分页获取用户喜欢列表")
     @GetMapping("/likeByCategory")
-    public ApiResponse<List<GifVO>> userLike(
+    public ApiResponse<List<UserLikeVO>> userLike(
             @RequestParam(value = "categoryId") Long categoryId,
             @RequestParam(value = "pageNum", required = false, defaultValue = "1") Integer pageNum,
             @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
@@ -197,7 +198,7 @@ public class GifController {
             // 获取当前登录用户ID
             Long userId = StpUtil.getLoginIdAsLong();
             
-            List<GifVO> gifList = gifProcessService.listUserLikes(userId, categoryId, pageNum, pageSize);
+            List<UserLikeVO> gifList = gifProcessService.listUserLikes(userId, categoryId, pageNum, pageSize);
             return ApiResponse.success(gifList);
         } catch (Exception e) {
             return ApiResponse.error(500, "获取用户喜欢列表失败: " + e.getMessage());

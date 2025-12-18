@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mawai.ghmbplus.dao.NotificationMapper">
+
+    <!-- 分页查询用户的通知列表（按时间倒序） -->
+    <select id="selectByRecipientIdWithPage" resultType="com.mawai.ghmbplus.model.Notification">
+        SELECT id, recipient_id, sender_id, action_type, target_id, 
+               content_snapshot, is_read, create_time
+        FROM notification
+        WHERE recipient_id = #{recipientId}
+        ORDER BY create_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 标记指定时间之前的未读通知为已读 -->
+    <update id="markAllAsRead">
+        UPDATE notification
+        SET is_read = true
+        WHERE recipient_id = #{recipientId}
+          AND is_read = false
+          AND create_time &lt;= #{beforeTime}
+    </update>
+
+    <!-- 删除指定时间之前的通知 -->
+    <delete id="deleteBeforeTime">
+        DELETE FROM notification
+        WHERE create_time &lt; #{beforeTime}
+    </delete>
+
+    <!-- 标记单个通知为已读 -->
+    <update id="markOneAsRead">
+        UPDATE notification
+        SET is_read = true
+        WHERE id = #{notificationId}
+          AND is_read = false
+    </update>
+
+    <!-- 统计用户的未读通知数量 -->
+    <select id="countUnreadByRecipientId" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM notification
+        WHERE recipient_id = #{recipientId}
+          AND is_read = false
+    </select>
+
+</mapper>
+
