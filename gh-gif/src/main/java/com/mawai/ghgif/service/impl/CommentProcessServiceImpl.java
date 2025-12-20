@@ -340,7 +340,7 @@ public class CommentProcessServiceImpl implements CommentProcessService {
                         // 如果获取不到，虚拟线程会阻塞等待（虚拟线程阻塞不会占用平台线程）
                         commentNotificationSemaphore.acquire();
                         try {
-                            Comment comment = commentService.getById(commentId);
+                            Comment comment = commentService.getById(Long.parseLong(commentId));
                             if (comment != null && comment.getUserId() != null) {
                                 // 发送到 SQS，由 NotificationConsumer 异步处理落库+推送
                                 notificationProcessService.sendCommentLikeNotification(

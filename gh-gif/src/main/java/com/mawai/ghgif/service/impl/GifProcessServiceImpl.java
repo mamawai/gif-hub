@@ -605,7 +605,7 @@ public class GifProcessServiceImpl implements GifProcessService {
                     dbGifIdsCreatedAtMap.remove(Long.parseLong(entry.getKey()));
                 } else if (entry.getValue().equals(categoryId)) {
                     // 如果value等于categoryId，则添加到dbGifIds中 Set去重
-                    dbGifIdsCreatedAtMap.put(Long.parseLong(entry.getKey()), null);
+                    dbGifIdsCreatedAtMap.put(Long.parseLong(entry.getKey()), LocalDateTime.now());
                 }
             }
             

@@ -577,7 +577,8 @@ public class GifScheduleExecutorWithSQS {
                     UserLike userLike = new UserLike()
                             .setUserId(userIdLong)
                             .setGifId(Long.parseLong(gifId))
-                            .setUserLikeCategoryId(categoryId);
+                            .setUserLikeCategoryId(categoryId)
+                            .setCreatedAt(LocalDateTime.now());
 
                     newLikes.add(userLike);
                 } catch (Exception e) {
