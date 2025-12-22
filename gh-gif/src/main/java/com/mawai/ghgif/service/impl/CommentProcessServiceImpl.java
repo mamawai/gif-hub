@@ -62,7 +62,6 @@ public class CommentProcessServiceImpl implements CommentProcessService {
     private final MessageService messageService;
     private final ModerationService moderationService;
     private final NotificationProcessService notificationProcessService;
-    private final com.mawai.ghmbplus.service.GifService gifService;
     // 注入虚拟线程池
     private final Executor fileUploadExecutor;
     

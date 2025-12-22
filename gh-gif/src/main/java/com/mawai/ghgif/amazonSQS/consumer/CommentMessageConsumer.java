@@ -57,7 +57,6 @@ public class CommentMessageConsumer implements MessageConsumer {
     private final UserNicknameCacheService userNicknameCacheService;
 
     private static final String CONSUMER_TYPE = "comment";
-    private static final String UNREAD_COUNT_KEY = "gh:notify:unread:";
 
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;

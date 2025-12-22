@@ -6,7 +6,6 @@ import com.mawai.ghaws.service.MessageService;
 import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
 import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
-import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.service.UserNicknameCacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
 import com.mawai.ghgif.amazonSQS.message.NotificationMessage;
@@ -41,13 +40,11 @@ public class NotificationMessageConsumer implements MessageConsumer {
     private final NotificationService notificationService;
     private final NotificationProcessService notificationProcessService;
     private final MessageService messageService;
-    private final CacheService cacheService;
     private final IdempotentHandler idempotentHandler;
     private final WebSocketNotificationService webSocketNotificationService;
     private final UserNicknameCacheService userNicknameCacheService;
 
     private static final String CONSUMER_TYPE = "notification";
-    private static final String UNREAD_COUNT_KEY = "gh:notify:unread:";
 
     @Value("${aws.sqs.base-queue-url}")
     private String queueUrl;
