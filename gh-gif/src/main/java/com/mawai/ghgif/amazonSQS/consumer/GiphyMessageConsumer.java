@@ -1,9 +1,9 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.json.JSONUtil;
-import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.constant.MessageType;
 import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
 import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.service.CacheService;
@@ -17,7 +17,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.util.function.Consumer;
@@ -51,7 +50,6 @@ public class GiphyMessageConsumer implements MessageConsumer {
         return message -> SpringUtils.getAopProxy(this).handle(message);
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public void handle(Message message) {
         String body = message.body();
         String messageId = message.messageId();
@@ -65,8 +63,8 @@ public class GiphyMessageConsumer implements MessageConsumer {
         // 解析消息
         GiphyMessage giphyMessage = JSONUtil.toBean(body, GiphyMessage.class);
 
-        // 使用幂等性处理器执行业务逻辑
-        IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
+        // 使用幂等性处理器执行业务逻辑（带事务）
+        IdempotentResult result = idempotentHandler.executeWithTransaction(CONSUMER_TYPE, messageId, () -> {
             try {
                 GiphyDTO giphyDTO = giphyMessage.getGiphyDTO();
                 Long userId = giphyMessage.getUserId();

@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.mawai.ghaws.constant.MessageType;
 import com.mawai.ghaws.service.MessageService;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
+import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.amazonSQS.message.CommentLikesMessage;
 import com.mawai.ghgif.service.CommentProcessService;
 import com.mawai.ghmbplus.dao.CommentLikeMapper;
@@ -31,9 +32,10 @@ public class CommentLikesConsumer extends AbstractBatchLikesConsumer<CommentLike
 
     public CommentLikesConsumer(MessageService messageService,
                                 IdempotentHandler idempotentHandler,
+                                CacheService cacheService,
                                 CommentLikeMapper commentLikeMapper,
                                 CommentProcessService commentProcessService) {
-        super(messageService, idempotentHandler);
+        super(messageService, idempotentHandler, cacheService);
         this.commentLikeMapper = commentLikeMapper;
         this.commentProcessService = commentProcessService;
     }

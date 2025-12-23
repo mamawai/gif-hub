@@ -1,15 +1,16 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.json.JSONUtil;
-import com.mawai.ghaws.message.GifMessage;
-import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.constant.MessageType;
+import com.mawai.ghaws.message.GifMessage;
 import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
 import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.PinYinUtils;
 import com.mawai.ghcommon.utils.SpringUtils;
+import com.mawai.ghmbplus.dao.TagMapper;
 import com.mawai.ghmbplus.model.Gif;
 import com.mawai.ghmbplus.model.GifDelete;
 import com.mawai.ghmbplus.model.GifTag;
@@ -17,15 +18,14 @@ import com.mawai.ghmbplus.model.Tag;
 import com.mawai.ghmbplus.service.GifDeleteService;
 import com.mawai.ghmbplus.service.GifService;
 import com.mawai.ghmbplus.service.GifTagService;
-import com.mawai.ghmbplus.dao.TagMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.services.sqs.model.Message;
-import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -60,7 +60,6 @@ public class GifMessageConsumer implements MessageConsumer {
         return message -> SpringUtils.getAopProxy(this).handle(message); // 切面/事务生效
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public void handle(Message message) {
         String body = message.body();
         String messageId = message.messageId();
@@ -76,8 +75,8 @@ public class GifMessageConsumer implements MessageConsumer {
         GifMessage gifMessage = JSONUtil.toBean(body, GifMessage.class);
 
         AtomicReference<Long> gifId = new AtomicReference<>(-1L);
-        // 使用幂等性处理器执行业务逻辑
-        IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
+        // 使用幂等性处理器执行业务逻辑（带事务）
+        IdempotentResult result = idempotentHandler.executeWithTransaction(CONSUMER_TYPE, messageId, () -> {
             try {
                 Long userId = gifMessage.getUserId();
 

@@ -167,7 +167,6 @@ public class EmailAuthServiceImpl implements EmailAuthService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void register(String email, String password, String verificationCode,String nickname) {
 
         // 如果未登录会抛出异常
@@ -182,54 +181,22 @@ public class EmailAuthServiceImpl implements EmailAuthService {
         String lockKey = REGISTER_LOCK_PREFIX + email;
         // 尝试获取分布式锁，值为当前时间戳，过期时间为10秒
         boolean lockAcquired = false;
-        
+
         try {
             // 尝试获取分布式锁
             lockAcquired = cacheService.setIfAbsent(
-                lockKey, 
-                String.valueOf(System.currentTimeMillis()), 
-                LOCK_TIMEOUT_SECONDS, 
+                lockKey,
+                String.valueOf(System.currentTimeMillis()),
+                LOCK_TIMEOUT_SECONDS,
                 TimeUnit.SECONDS
             );
-            
+
             if (!lockAcquired) {
                 throw new RuntimeException("请勿重复注册");
             }
 
-            QueryWrapper<User> queryWrapper = new QueryWrapper<>();
-            queryWrapper.eq("email", email);
-            if (userMapper.selectOne(queryWrapper) != null) {
-                throw new RuntimeException("该邮箱已注册");
-            }
-
-            // 查询用户 -- 用户注册已经在微信登陆中实现
-            User user = userMapper.selectById(userId);
-            if (user == null) {
-                throw new RuntimeException("用户不存在"); //正常来说不会出现这种情况    
-            }
-
-            // 如果nickname是空就随机一个uuid
-            if (!StringUtils.hasText(nickname)) {
-                nickname = "user_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
-            }
-            
-            // 更新用户信息
-            user.setEmail(email);
-            user.setEmailVerified((byte) 1); // 注册
-            user.setPassword(passwordEncoder.encode(RsaEncryptUtil.decrypt(password))); // 先私钥解密，再密码加密存储
-            user.setNickname(nickname);
-            user.setStatus((byte) 1);  // 正常状态
-            user.setUpdatedAt(LocalDateTime.now());
-            userMapper.updateById(user);
-
-            // 写入昵称缓存
-            userNicknameCacheService.updateNickname(userId, nickname);
-
-            // 创建默认分类
-            userCategoryMapper.insert(new UserCategory().setUserId(userId).setCategoryName("默认"));
-            
-            // 设置邮箱认证状态
-            StpUtil.getSession().set("emailAuth", "full");
+            // 在锁内执行事务
+            SpringUtils.getAopProxy(this).registerWithTransaction(email, password, nickname, userId);
 
         } catch (Exception e) {
             log.error("用户注册失败: {}", e.getMessage(), e);
@@ -241,6 +208,44 @@ public class EmailAuthServiceImpl implements EmailAuthService {
                 log.info("释放邮箱注册分布式锁: {}", email);
             }
         }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void registerWithTransaction(String email, String password, String nickname, Long userId) throws Exception {
+        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("email", email);
+        if (userMapper.selectOne(queryWrapper) != null) {
+            throw new RuntimeException("该邮箱已注册");
+        }
+
+        // 查询用户 -- 用户注册已经在微信登陆中实现
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在"); //正常来说不会出现这种情况
+        }
+
+        // 如果nickname是空就随机一个uuid
+        if (!StringUtils.hasText(nickname)) {
+            nickname = "user_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        }
+
+        // 更新用户信息
+        user.setEmail(email);
+        user.setEmailVerified((byte) 1); // 注册
+        user.setPassword(passwordEncoder.encode(RsaEncryptUtil.decrypt(password))); // 先私钥解密，再密码加密存储
+        user.setNickname(nickname);
+        user.setStatus((byte) 1);  // 正常状态
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+
+        // 写入昵称缓存
+        userNicknameCacheService.updateNickname(userId, nickname);
+
+        // 创建默认分类
+        userCategoryMapper.insert(new UserCategory().setUserId(userId).setCategoryName("默认"));
+
+        // 设置邮箱认证状态
+        StpUtil.getSession().set("emailAuth", "full");
     }
 
     /**

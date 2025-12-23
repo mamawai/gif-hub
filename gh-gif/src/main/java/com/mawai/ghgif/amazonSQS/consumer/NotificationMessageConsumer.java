@@ -18,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.time.LocalDateTime;
@@ -54,7 +53,6 @@ public class NotificationMessageConsumer implements MessageConsumer {
         return message -> SpringUtils.getAopProxy(this).handle(message);
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public void handle(Message message) {
         String body = message.body();
         String messageId = message.messageId();
@@ -69,8 +67,8 @@ public class NotificationMessageConsumer implements MessageConsumer {
         // 解析消息
         NotificationMessage notificationMessage = JSONUtil.toBean(body, NotificationMessage.class);
 
-        // 使用幂等性处理器执行业务逻辑
-        IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
+        // 使用幂等性处理器执行业务逻辑（带事务）
+        IdempotentResult result = idempotentHandler.executeWithTransaction(CONSUMER_TYPE, messageId, () -> {
             try {
                 // 构建通知对象
                 Notification notification = buildNotification(notificationMessage);

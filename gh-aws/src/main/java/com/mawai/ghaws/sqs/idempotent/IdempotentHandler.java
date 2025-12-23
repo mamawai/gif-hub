@@ -4,6 +4,7 @@ import com.mawai.ghcommon.service.CacheService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -51,6 +52,7 @@ import java.util.function.Supplier;
 public class IdempotentHandler {
 
     private final CacheService cacheService;
+    private final TransactionTemplate transactionTemplate;
 
     /**
      * 分布式锁过期时间（秒）
@@ -77,14 +79,35 @@ public class IdempotentHandler {
     private static final int MAX_RETRY_TIMES = 3;
 
     /**
-     * 执行幂等性处理
+     * 执行幂等性处理（不带事务）
+     * 用于批量处理场景，业务逻辑自己管理事务
      *
-     * @param consumerType  消费者类型（如：gif、comment、commentlikes、userlikes）
+     * @param consumerType  消费者类型
      * @param messageId     SQS 消息 ID
      * @param businessLogic 业务逻辑（返回 true 表示成功，false 表示失败）
      * @return 处理结果
      */
     public IdempotentResult execute(String consumerType, String messageId, Supplier<Boolean> businessLogic) {
+        return executeInternal(consumerType, messageId, businessLogic, false);
+    }
+
+    /**
+     * 执行幂等性处理（带事务）
+     * 确保：获取锁 → 开启事务 → 业务逻辑 → 事务提交 → 标记已处理 → 释放锁
+     *
+     * @param consumerType  消费者类型
+     * @param messageId     SQS 消息 ID
+     * @param businessLogic 业务逻辑（返回 true 表示成功，false 表示失败）
+     * @return 处理结果
+     */
+    public IdempotentResult executeWithTransaction(String consumerType, String messageId, Supplier<Boolean> businessLogic) {
+        return executeInternal(consumerType, messageId, businessLogic, true);
+    }
+
+    /**
+     * 内部执行方法
+     */
+    private IdempotentResult executeInternal(String consumerType, String messageId, Supplier<Boolean> businessLogic, boolean withTransaction) {
         String lockKey = "idp:lock:" + consumerType + ":" + messageId;
         String processedKey = "idp:process:" + consumerType + ":" + messageId;
         String retryKey = "idp:retry:" + consumerType + ":" + messageId;
@@ -103,11 +126,26 @@ public class IdempotentHandler {
             }
 
             try {
-                // 3. 执行业务逻辑
-                boolean success = businessLogic.get();
+                // 3. 执行业务逻辑（带或不带事务）
+                boolean success;
+                if (withTransaction) {
+                    // 在事务中执行业务逻辑
+                    Boolean result = transactionTemplate.execute(status -> {
+                        try {
+                            return businessLogic.get();
+                        } catch (Exception e) {
+                            status.setRollbackOnly();
+                            throw e;
+                        }
+                    });
+                    success = result != null && result;
+                } else {
+                    // 不带事务执行
+                    success = businessLogic.get();
+                }
 
                 if (success) {
-                    // 4. 标记为已处理
+                    // 4. 标记为已处理（事务提交后）
                     markAsProcessed(processedKey);
                     log.info("[幂等性] 处理成功: type={}, msgId={}", consumerType, messageId);
                     return IdempotentResult.success();

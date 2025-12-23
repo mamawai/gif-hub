@@ -1,12 +1,12 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
-import java.util.function.Consumer;
-
-import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.constant.MessageType;
-import software.amazon.awssdk.services.sqs.model.Message;
+import com.mawai.ghaws.sqs.MessageConsumer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
+
+import java.util.function.Consumer;
 
 @Slf4j
 @Component

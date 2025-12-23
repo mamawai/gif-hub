@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.mawai.ghaws.constant.MessageType;
 import com.mawai.ghaws.service.MessageService;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
+import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghgif.amazonSQS.message.UserLikesMessage;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghmbplus.model.UserLike;
@@ -31,9 +32,10 @@ public class UserLikesConsumer extends AbstractBatchLikesConsumer<UserLikesMessa
 
     public UserLikesConsumer(MessageService messageService,
                              IdempotentHandler idempotentHandler,
+                             CacheService cacheService,
                              UserLikeService userLikeService,
                              GifProcessService gifProcessService) {
-        super(messageService, idempotentHandler);
+        super(messageService, idempotentHandler, cacheService);
         this.userLikeService = userLikeService;
         this.gifProcessService = gifProcessService;
     }

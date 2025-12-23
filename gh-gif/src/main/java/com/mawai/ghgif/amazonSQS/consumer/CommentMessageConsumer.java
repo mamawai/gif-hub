@@ -2,9 +2,9 @@ package com.mawai.ghgif.amazonSQS.consumer;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
-import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.constant.MessageType;
 import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
 import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
 import com.mawai.ghcommon.service.UserNicknameCacheService;
@@ -23,7 +23,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 import java.time.LocalDateTime;
@@ -66,7 +65,6 @@ public class CommentMessageConsumer implements MessageConsumer {
         return message -> SpringUtils.getAopProxy(this).handle(message);
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public void handle(Message message) {
         String body = message.body();
         String messageId = message.messageId();
@@ -81,8 +79,8 @@ public class CommentMessageConsumer implements MessageConsumer {
         // 解析消息（提前解析，用于异常处理）
         CommentMessage commentMessage = JSONUtil.toBean(body, CommentMessage.class);
 
-        // 使用幂等性处理器执行业务逻辑
-        IdempotentResult result = idempotentHandler.execute(CONSUMER_TYPE, messageId, () -> {
+        // 使用幂等性处理器执行业务逻辑（带事务）
+        IdempotentResult result = idempotentHandler.executeWithTransaction(CONSUMER_TYPE, messageId, () -> {
             try {
                 Long userId = commentMessage.getUserId();
 

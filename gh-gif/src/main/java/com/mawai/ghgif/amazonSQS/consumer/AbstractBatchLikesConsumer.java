@@ -1,21 +1,22 @@
 package com.mawai.ghgif.amazonSQS.consumer;
 
-import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.service.MessageService;
+import com.mawai.ghaws.sqs.MessageConsumer;
 import com.mawai.ghaws.sqs.batch.BatchMessageWrapper;
 import com.mawai.ghaws.sqs.batch.BatchProcessor;
 import com.mawai.ghaws.sqs.idempotent.IdempotentHandler;
-import com.mawai.ghaws.sqs.idempotent.IdempotentResult;
+import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghcommon.utils.SpringUtils;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.services.sqs.model.Message;
 
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -32,6 +33,7 @@ public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsume
 
     protected final MessageService messageService;
     protected final IdempotentHandler idempotentHandler;
+    protected final CacheService cacheService;
 
     @Value("${aws.sqs.base-queue-url}")
     protected String queueUrl;
@@ -43,9 +45,10 @@ public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsume
     // 超时时间：2秒
     private static final long TIMEOUT_MILLIS = 2000;
 
-    protected AbstractBatchLikesConsumer(MessageService messageService, IdempotentHandler idempotentHandler) {
+    protected AbstractBatchLikesConsumer(MessageService messageService, IdempotentHandler idempotentHandler, CacheService cacheService) {
         this.messageService = messageService;
         this.idempotentHandler = idempotentHandler;
+        this.cacheService = cacheService;
     }
 
     @PostConstruct
@@ -84,15 +87,18 @@ public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsume
         // 解析消息
         M businessMessage = parseMessage(body);
 
-        // 幂等性检查
-        IdempotentResult result = idempotentHandler.execute(getConsumerType(), messageId, () -> {
-            // 通过幂等性检查，加入批量处理队列
-            batchProcessor.add(new BatchMessageWrapper<>(message, businessMessage));
-            return true;
-        });
+        // 幂等性检查（不标记已处理，只检查和加锁）
+        String processedKey = "idp:process:" + getConsumerType() + ":" + messageId;
 
-        // 处理幂等性结果
-        handleIdempotentResult(result, message, businessMessage);
+        // 检查是否已处理
+        if ("1".equals(cacheService.get(processedKey))) {
+            log.info("[幂等性] 消息已处理，跳过: type={}, msgId={}", getConsumerType(), messageId);
+            messageService.deleteMessage(message.receiptHandle(), queueUrl);
+            return;
+        }
+
+        // 加入批量处理队列（批量处理成功后会标记已处理）
+        batchProcessor.add(new BatchMessageWrapper<>(message, businessMessage));
     }
 
     /**
@@ -136,12 +142,19 @@ public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsume
             log.info("批量删除: 总数={}, 实际删除={}", allDeleteLikes.size(), deleted);
         }
 
-        // 事务提交后删除所有SQS消息
+        // 事务提交后删除所有SQS消息并标记已处理
         registerAfterCommit(() -> {
             for (BatchMessageWrapper<M> wrapper : batch) {
                 try {
+                    String messageId = wrapper.getSqsMessage().messageId();
+
+                    // 标记为已处理
+                    String processedKey = "idp:process:" + getConsumerType() + ":" + messageId;
+                    cacheService.set(processedKey, "1", 120, TimeUnit.SECONDS);
+
+                    // 删除SQS消息
                     messageService.deleteMessage(wrapper.getSqsMessage().receiptHandle(), queueUrl);
-                    log.debug("SQS消息删除成功: messageId={}", wrapper.getSqsMessage().messageId());
+                    log.debug("SQS消息删除成功: messageId={}", messageId);
                 } catch (Exception e) {
                     log.error("删除SQS消息失败: messageId={}", wrapper.getSqsMessage().messageId(), e);
                 }
@@ -186,49 +199,22 @@ public abstract class AbstractBatchLikesConsumer<M, E> implements MessageConsume
             batchDelete(deleteLikes);
         }
 
-        // 事务提交后删除SQS消息
+        // 事务提交后删除SQS消息并标记已处理
         registerAfterCommit(() -> {
             try {
+                String messageId = sqsMessage.messageId();
+
+                // 标记为已处理
+                String processedKey = "idp:process:" + getConsumerType() + ":" + messageId;
+                cacheService.set(processedKey, "1", 120, TimeUnit.SECONDS);
+
+                // 删除SQS消息
                 messageService.deleteMessage(sqsMessage.receiptHandle(), queueUrl);
-                log.info("单条处理成功，SQS消息已删除: messageId={}", sqsMessage.messageId());
+                log.info("单条处理成功，SQS消息已删除: messageId={}", messageId);
             } catch (Exception e) {
                 log.error("删除SQS消息失败: messageId={}", sqsMessage.messageId(), e);
             }
         });
-    }
-
-    /**
-     * 处理幂等性结果
-     */
-    private void handleIdempotentResult(IdempotentResult result, Message message, M businessMessage) {
-        String messageId = message.messageId();
-
-        switch (result.getStatus()) {
-            case ALREADY_PROCESSED:
-                messageService.deleteMessage(message.receiptHandle(), queueUrl);
-                break;
-
-            case PROCESSING:
-                break;
-
-            case SUCCESS:
-                break;
-
-            case FAILED:
-            case EXCEPTION:
-                long retryTimes = result.getRetryTimes();
-                log.warn("消息处理失败，重试次数: {}", retryTimes);
-
-                if (idempotentHandler.isExceedMaxRetry(retryTimes)) {
-                    log.error("消息处理失败3次，开始回滚 Redis，messageId: {}", messageId);
-                    handleProcessingFailure(businessMessage);
-                }
-
-                if (result.shouldThrowException()) {
-                    throw new RuntimeException("处理消息失败: " + result.getException().getMessage(), result.getException());
-                }
-                break;
-        }
     }
 
     /**
