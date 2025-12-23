@@ -230,9 +230,10 @@ public class GifController {
      */
     @Operation(summary = "随机获取gif列表", description = "随机获取gif列表")
     @GetMapping(value = {"/randomGifs", "/randomGifs/{lastId}"})
-    public ApiResponse<List<GifVO>> randomList(@PathVariable(required = false) String lastId) {
+    public ApiResponse<List<GifVO>> randomList(@PathVariable(required = false) String lastId,
+                                               @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         try {
-            List<GifVO> gifVOList = gifProcessService.getRandomGifs(lastId);
+            List<GifVO> gifVOList = gifProcessService.getRandomGifs(lastId, pageSize);
             return ApiResponse.success(gifVOList, "success:" + gifProcessService.getTotalGifCount()); // total 拼在message里面
         } catch (Exception e) {
             return ApiResponse.error(500, "获取随机gif列表失败：" + e.getMessage());

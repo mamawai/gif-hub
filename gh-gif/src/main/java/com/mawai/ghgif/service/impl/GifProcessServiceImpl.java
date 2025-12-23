@@ -818,7 +818,7 @@ public class GifProcessServiceImpl implements GifProcessService {
      * @see #getRandomGif() 获取随机数据方法
      */
     @Override
-    public List<GifVO> getRandomGifs(String lastId) {
+    public List<GifVO> getRandomGifs(String lastId, Integer pageSize) {
         Long rId;
         // 如果lastId为空，则随机获取一条数据
         if (lastId == null || lastId.isEmpty()) {
@@ -829,20 +829,20 @@ public class GifProcessServiceImpl implements GifProcessService {
 
         if (rId == null) throw new RuntimeException("随机Id为空");
         
-        // 从这一条开始查询10个 直接limit 10
+        // 从这一条开始查询pageSize个 直接limit pageSize
         List<Gif> gifList = gifService.list(new LambdaQueryWrapper<Gif>()
                 .eq(Gif::getStatus, 1)
                 .gt(Gif::getId, rId)
                 .orderByAsc(Gif::getId)
-                .last("limit 10"));
+                .last("limit " + pageSize));
 
         // 如果数量小于10 也就是说取的是后10条数据，那么差几条就从库中前几条补
-        if (gifList.size() < 10) {
+        if (gifList.size() < pageSize) {
             // 从数据库中获取前10 - gifList.size() 条数据
             List<Gif> gifList2 = gifService.list(new LambdaQueryWrapper<Gif>()
                     .eq(Gif::getStatus, 1)
                     .orderByAsc(Gif::getId)
-                    .last("limit " + (10 - gifList.size())));
+                    .last("limit " + (pageSize - gifList.size())));
             gifList.addAll(gifList2);
         }
 

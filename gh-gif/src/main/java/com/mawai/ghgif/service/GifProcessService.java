@@ -101,9 +101,10 @@ public interface GifProcessService {
      * 随机获取GIF列表
      *
      * @param lastId 上次查询最后一个GIF的ID，用于分页加载
+     * @param pageSize 每页数量
      * @return 随机GIF列表
      */
-    List<GifVO> getRandomGifs(String lastId);
+    List<GifVO> getRandomGifs(String lastId, Integer pageSize);
 
     /**
      * 随机获取一个GIF
