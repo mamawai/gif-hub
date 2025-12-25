@@ -47,7 +47,12 @@ public class EmailAuthServiceImpl implements EmailAuthService {
      * 验证码在Redis中的前缀
      */
     private static final String CODE_KEY_PREFIX = "EMAIL_VERIFICATION_CODE:";
-    
+
+    /**
+     * 重置密码验证码前缀
+     */
+    private static final String RESET_PASSWORD_CODE_PREFIX = "RESET_PASSWORD_CODE:";
+
     /**
      * 注册分布式锁前缀
      */
@@ -538,6 +543,110 @@ public class EmailAuthServiceImpl implements EmailAuthService {
                 cacheService.delete(lockKey);
                 log.info("释放注销分布式锁: userId={}", userId);
             }
+        }
+    }
+
+    /**
+     * 发送重置密码验证码
+     */
+    @Override
+    public boolean sendResetPasswordCode(String email) {
+        try {
+            // 1. 检查邮箱是否在黑名单中（24小时内注销的邮箱）
+            String blacklistKey = DELETED_EMAIL_BLACKLIST_PREFIX + email;
+            if (cacheService.get(blacklistKey) != null) {
+                throw new RuntimeException("该邮箱已注销，24小时内无法操作");
+            }
+
+            // 2. 查询是否有这个邮箱用户
+            QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("email", email);
+            User user = userMapper.selectOne(queryWrapper);
+            if (user == null) {
+                throw new RuntimeException("邮箱不存在");
+            }
+
+            // 3. 检查是否已发送验证码
+            String key = RESET_PASSWORD_CODE_PREFIX + email;
+            String storedCode = cacheService.get(key);
+            if (storedCode != null) {
+                throw new RuntimeException("验证码已发送，请稍后再试");
+            }
+
+            // 4. 生成6位随机数字验证码
+            String verificationCode = generateVerificationCode();
+
+            // 5. 异步发送重置密码邮件
+            sendResetPasswordEmailAsync(email, verificationCode);
+
+            // 6. 将验证码存入Redis，设置过期时间
+            cacheService.set(key, verificationCode, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
+
+            log.info("重置密码验证码发送成功: {}", email);
+            return true;
+        } catch (Exception e) {
+            log.error("发送重置密码验证码失败: {}", e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * 异步发送重置密码验证码邮件
+     *
+     * @param email 收件人邮箱
+     * @param verificationCode 验证码
+     */
+    @Async("wxVirtualExecutor")
+    public void sendResetPasswordEmailAsync(String email, String verificationCode) {
+        String subject = "GIF-HUB 重置密码";
+        String content = "您正在重置GIF-HUB账号密码，验证码是：" + verificationCode + "，" + CODE_EXPIRE_MINUTES + "分钟内有效。如非本人操作，请忽略此邮件。";
+        try {
+            emailStrategy.useResendEmailService(email, subject, content);
+            log.info("重置密码邮件发送成功: {}", email);
+        } catch (Exception e) {
+            log.error("异步发送重置密码邮件失败: {}, 错误: {}", email, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 重置密码
+     */
+    @Override
+    public boolean resetPassword(String email, String verificationCode, String newPassword) {
+        try {
+            // 1. 验证邮箱是否存在
+            QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+            queryWrapper.eq("email", email);
+            User user = userMapper.selectOne(queryWrapper);
+            if (user == null) {
+                throw new RuntimeException("邮箱不存在");
+            }
+
+            // 2. 验证验证码
+            String key = RESET_PASSWORD_CODE_PREFIX + email;
+            String storedCode = cacheService.get(key);
+            if (storedCode == null) {
+                throw new RuntimeException("验证码已过期或不存在");
+            }
+            if (!storedCode.equals(verificationCode)) {
+                throw new RuntimeException("验证码错误");
+            }
+
+            // 3. 删除验证码，防止重复使用
+            cacheService.delete(key);
+
+            // 4. 更新密码
+            String decodedPassword = RsaEncryptUtil.decrypt(newPassword);
+            String encodedPassword = passwordEncoder.encode(decodedPassword);
+            user.setPassword(encodedPassword);
+            user.setUpdatedAt(LocalDateTime.now());
+            userMapper.updateById(user);
+
+            log.info("密码重置成功: email={}, userId={}", email, user.getId());
+            return true;
+        } catch (Exception e) {
+            log.error("重置密码失败: {}", e.getMessage(), e);
+            throw new RuntimeException(e.getMessage());
         }
     }
 }

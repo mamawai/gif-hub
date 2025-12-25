@@ -90,4 +90,22 @@ public interface EmailAuthService {
      * @return 是否注销成功
      */
     boolean deleteAccount(String password);
+
+    /**
+     * 发送重置密码验证码
+     *
+     * @param email 邮箱地址
+     * @return 是否发送成功
+     */
+    boolean sendResetPasswordCode(String email);
+
+    /**
+     * 重置密码
+     *
+     * @param email 邮箱地址
+     * @param verificationCode 验证码
+     * @param newPassword 新密码（RSA加密）
+     * @return 是否重置成功
+     */
+    boolean resetPassword(String email, String verificationCode, String newPassword);
 }

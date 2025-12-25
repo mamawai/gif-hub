@@ -228,4 +228,44 @@ public class EmailAuthController {
             return ApiResponse.error(500, "注销账号失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 发送重置密码验证码
+     *
+     * @param email 邮箱地址
+     * @return 发送结果
+     */
+    @Operation(summary = "发送重置密码验证码", description = "向已注册邮箱发送重置密码验证码")
+    @PostMapping("/reset-password/code")
+    public ApiResponse<Boolean> sendResetPasswordCode(@RequestParam String email) {
+        try {
+            boolean result = emailAuthService.sendResetPasswordCode(email);
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("发送重置密码验证码失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, e.getMessage());
+        }
+    }
+
+    /**
+     * 重置密码
+     *
+     * @param resetPasswordDTO 重置密码请求
+     * @return 重置结果
+     */
+    @Operation(summary = "重置密码", description = "通过邮箱验证码重置密码")
+    @PostMapping("/reset-password")
+    public ApiResponse<Boolean> resetPassword(@RequestBody ResetPasswordDTO resetPasswordDTO) {
+        try {
+            boolean result = emailAuthService.resetPassword(
+                    resetPasswordDTO.getEmail(),
+                    resetPasswordDTO.getVerificationCode(),
+                    resetPasswordDTO.getNewPassword()
+            );
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("重置密码失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, e.getMessage());
+        }
+    }
 }
