@@ -508,7 +508,7 @@ public class EmailAuthServiceImpl implements EmailAuthService {
         User user = userMapper.selectOne(queryWrapper);
 
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new RuntimeException("请先注册邮箱");
         }
 
         // 根据传入参数判断登录方式

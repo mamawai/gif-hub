@@ -153,6 +153,10 @@ public class EmailAuthController {
             return ApiResponse.success(result);
         } catch (Exception e) {
             log.error("Web端登录失败: {}", e.getMessage(), e);
+            if (e.getMessage().equals("请先注册邮箱")) {
+                // 1001 前端跳转到注册
+                return ApiResponse.error(1001, e.getMessage(), new LoginResultVO( null));
+            }
             return ApiResponse.error(500, "登录失败: " + e.getMessage());
         }
     }

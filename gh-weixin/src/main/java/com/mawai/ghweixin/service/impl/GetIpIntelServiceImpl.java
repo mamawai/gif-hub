@@ -109,8 +109,8 @@ public class GetIpIntelServiceImpl implements GetIpIntelService {
                 .queryParam("ip", ip)
                 .queryParam("contact", config.getContactEmail())
                 .queryParam("format", "json")
-                .queryParam("flags", flags)    // 默认 m: 快速模式
-                .queryParam("oflags", oflags); // 默认 bca: 恶意IP+国家+ASN
+                .queryParam("flags", flags)    // 默认 b
+                .queryParam("oflags", oflags); // 默认 bcar: 恶意IP+国家+ASN+住宅 才准
 
         String url = builder.toUriString();
 
