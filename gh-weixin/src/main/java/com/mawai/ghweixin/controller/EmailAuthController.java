@@ -4,10 +4,12 @@ import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.service.EmailAuthService;
+import com.mawai.ghweixin.utils.IpUtil;
 import com.mawai.ghweixin.vo.LoginResultVO;
 import com.mawai.ghweixin.vo.UserInfoVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -47,24 +49,65 @@ public class EmailAuthController {
     }
 
     /**
-     * 用户注册
+     * 小程序用户注册（绑定邮箱）
      *
      * @param registerDTO 注册信息
+     * @param request HTTP 请求
      * @return 注册结果
      */
-    @Operation(summary = "用户注册", description = "使用邮箱和验证码注册新用户")
+    @Operation(summary = "小程序用户注册", description = "小程序用户绑定邮箱（需要已登录微信）")
     @PostMapping("/register")
-    public ApiResponse<Boolean> register(@RequestBody EmailRegisterDTO registerDTO) {
+    public ApiResponse<Boolean> register(@RequestBody EmailRegisterDTO registerDTO, HttpServletRequest request) {
         try {
+            // 获取客户端真实 IP（仅接受 Cloudflare 请求）
+            String clientIp = IpUtil.getClientIp(request);
+            log.info("小程序用户注册请求: email={}, ip={}, fingerprint={}",
+                    registerDTO.getEmail(), clientIp, registerDTO.getFingerprint());
+
+            // 小程序注册（需要已登录微信）
             emailAuthService.register(
                     registerDTO.getEmail(),
                     registerDTO.getPassword(),
                     registerDTO.getVerificationCode(),
-                    registerDTO.getNickname()
+                    registerDTO.getNickname(),
+                    clientIp,
+                    registerDTO.getFingerprint()
             );
             return ApiResponse.success(true);
-        } catch (Exception e) {
-            log.error("用户注册失败: {}", e.getMessage(), e);
+        } catch (RuntimeException e) {
+            log.error("小程序用户注册失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, "用户注册失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Web端用户注册（独立注册）
+     *
+     * @param registerDTO 注册信息
+     * @param request HTTP 请求
+     * @return 注册结果（包含token）
+     */
+    @Operation(summary = "Web端用户注册", description = "Web端独立注册新用户（不需要微信登录）")
+    @PostMapping("/web/register")
+    public ApiResponse<LoginResultVO> webRegister(@RequestBody EmailRegisterDTO registerDTO, HttpServletRequest request) {
+        try {
+            // 获取客户端真实 IP（仅接受 Cloudflare 请求）
+            String clientIp = IpUtil.getClientIp(request);
+            log.info("Web端用户注册请求: email={}, ip={}, fingerprint={}",
+                    registerDTO.getEmail(), clientIp, registerDTO.getFingerprint());
+
+            // Web端独立注册（不需要微信登录）
+            LoginResultVO result = emailAuthService.webRegister(
+                    registerDTO.getEmail(),
+                    registerDTO.getPassword(),
+                    registerDTO.getVerificationCode(),
+                    registerDTO.getNickname(),
+                    clientIp,
+                    registerDTO.getFingerprint()
+            );
+            return ApiResponse.success(result);
+        } catch (RuntimeException e) {
+            log.error("Web端用户注册失败: {}", e.getMessage(), e);
             return ApiResponse.error(500, "用户注册失败: " + e.getMessage());
         }
     }

@@ -24,11 +24,9 @@ public class SaTokenConfig extends BaseSaTokenConfig {
      */
     private final List<String> WECHAT_EXCLUDE_PATHS = Arrays.asList(
             "/wechat/login",
-            "/user/register", 
-            "/user/code",
-            "/user/login",
             "/wechat/public_key",
             "/user/web/code",
+            "/user/web/register",
             "/user/web/login",
             "/user/reset-password/code",
             "/user/reset-password"

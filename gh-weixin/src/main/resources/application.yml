@@ -37,3 +37,28 @@ wechat:
   secret: ${WECHAT_SECRET}
   grantType: authorization_code
   loginUrl: https://api.weixin.qq.com/sns/jscode2session
+
+# GetIPIntel IP 欺诈检测配置
+getipintel:
+  contact:
+    email: ${GETIPINTEL_CONTACT_EMAIL}
+  enabled: ${GETIPINTEL_ENABLED}
+  flags: ${GETIPINTEL_FLAGS}
+  oflags: ${GETIPINTEL_OFLAGS}
+  connect:
+    timeout: ${GETIPINTEL_CONNECT_TIMEOUT}
+  read:
+    timeout: ${GETIPINTEL_READ_TIMEOUT}
+  threshold:
+    reject: ${GETIPINTEL_REJECT_THRESHOLD}
+
+# 临时邮箱检测配置
+disposable-email:
+  enabled: ${DISPOSABLE_EMAIL_ENABLED}
+  auto-update: ${DISPOSABLE_EMAIL_AUTO_UPDATE}
+  update-cron: ${DISPOSABLE_EMAIL_UPDATE_CRON}
+
+# Cloudflare 配置
+cloudflare:
+  validation:
+    enabled: ${CLOUDFLARE_VALIDATION_ENABLED}

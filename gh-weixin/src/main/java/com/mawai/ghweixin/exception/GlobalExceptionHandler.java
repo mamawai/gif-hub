@@ -2,13 +2,14 @@ package com.mawai.ghweixin.exception;
 
 import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
+import com.mawai.ghweixin.utils.IpUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * 全局异常处理器
- * 
+ *
  * @author mawai
  */
 @RestControllerAdvice
@@ -32,5 +33,14 @@ public class GlobalExceptionHandler {
         };
         log.warn("Not login exception: type={}, message={}", e.getType(), message);
         return ApiResponse.error(401, message);
+    }
+
+    /**
+     * 处理非 Cloudflare 请求异常
+     */
+    @ExceptionHandler(IpUtil.InvalidRequestException.class)
+    public ApiResponse<Object> handleInvalidRequestException(IpUtil.InvalidRequestException e) {
+        log.warn("Invalid request exception: {}", e.getMessage());
+        return ApiResponse.error(403, "访问被拒绝");
     }
 }

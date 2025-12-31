@@ -17,14 +17,29 @@ public interface EmailAuthService {
     boolean sendVerificationCode(String email);
     
     /**
-     * 注册用户（通过邮箱）
-     * 
+     * 注册用户（通过邮箱）- 微信用户绑定邮箱
+     *
      * @param email 邮箱
      * @param password 密码
      * @param verificationCode 验证码
      * @param nickname 昵称
+     * @param clientIp 客户端IP地址
+     * @param fingerprint 浏览器指纹
      */
-    void register(String email, String password, String verificationCode, String nickname);
+    void register(String email, String password, String verificationCode, String nickname, String clientIp, String fingerprint);
+
+    /**
+     * Web 端独立注册（不需要微信登录）
+     *
+     * @param email 邮箱
+     * @param password 密码
+     * @param verificationCode 验证码
+     * @param nickname 昵称
+     * @param clientIp 客户端IP地址
+     * @param fingerprint 浏览器指纹
+     * @return 登录结果（包含token）
+     */
+    LoginResultVO webRegister(String email, String password, String verificationCode, String nickname, String clientIp, String fingerprint);
     
     /**
      * Web端发送验证码

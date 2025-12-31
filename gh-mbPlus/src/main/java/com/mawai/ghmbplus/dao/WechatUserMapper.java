@@ -1,18 +1,18 @@
 package com.mawai.ghmbplus.dao;
 
-import com.mawai.ghmbplus.model.User;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.mawai.ghmbplus.model.WechatUser;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
  * <p>
- * 用户表 Mapper 接口
+ * 微信用户表 Mapper 接口
  * </p>
  *
  * @author mawai
- * @since 2025-07-14
+ * @since 2025-12-27
  */
 @Mapper
-public interface UserMapper extends BaseMapper<User> {
+public interface WechatUserMapper extends BaseMapper<WechatUser> {
 
 }

@@ -11,7 +11,7 @@ public interface WeChatAuthService {
      * 微信登录
      *
      * @param code 微信授权code
-     * @return 登录结果，包含token和用户信息
+     * @return 登录结果，返回token
      */
     LoginResultVO loginWithWeChat(String code);
 }

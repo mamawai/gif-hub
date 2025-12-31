@@ -25,4 +25,7 @@ public class EmailRegisterDTO {
     
     @Schema(description = "用户昵称")
     private String nickname;
+
+    @Schema(description = "浏览器指纹--虽然不可信")
+    private String fingerprint;
 } 

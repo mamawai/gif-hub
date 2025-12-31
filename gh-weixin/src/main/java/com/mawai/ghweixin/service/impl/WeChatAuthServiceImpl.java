@@ -2,7 +2,9 @@ package com.mawai.ghweixin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.mawai.ghmbplus.dao.UserMapper;
+import com.mawai.ghmbplus.dao.WechatUserMapper;
 import com.mawai.ghmbplus.model.User;
+import com.mawai.ghmbplus.model.WechatUser;
 import com.mawai.ghweixin.service.WeChatAuthService;
 import com.mawai.ghweixin.utils.HttpClientUtil;
 import com.mawai.ghweixin.vo.LoginResultVO;
@@ -19,13 +21,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class WeChatAuthServiceImpl implements WeChatAuthService {
 
-    protected final UserMapper userMapper;
+    private final UserMapper userMapper;
+    private final WechatUserMapper wechatUserMapper;
 
     @Value("${wechat.appId}")
     private String WECHAT_APP_ID;
@@ -43,26 +47,87 @@ public class WeChatAuthServiceImpl implements WeChatAuthService {
     @Transactional(rollbackFor = Exception.class)
     public LoginResultVO loginWithWeChat(String code) {
         String openId = getOpenId(code);
-        // 查询用户是否存在
-        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("open_id", openId);
-        User user = userMapper.selectOne(queryWrapper);
 
-        if (user == null) {
-            // 用户不存在，创建新用户
-            user = new User();
-            user.setOpenId(openId);
-            user.setStatus((byte) 1);
-            user.setEmailVerified((byte) 0);
-            user.setCreatedAt(LocalDateTime.now());
-            user.setUpdatedAt(LocalDateTime.now());
-            userMapper.insert(user);
+        // 1. 查询或创建 wechat_user
+        QueryWrapper<WechatUser> wechatQuery = new QueryWrapper<>();
+        wechatQuery.eq("open_id", openId);
+        WechatUser wechatUser = wechatUserMapper.selectOne(wechatQuery);
+
+        if (wechatUser == null) {
+            // 创建新的微信用户记录
+            wechatUser = new WechatUser()
+                    .setOpenId(openId)
+                    .setCreatedAt(LocalDateTime.now())
+                    .setUpdatedAt(LocalDateTime.now());
+            wechatUserMapper.insert(wechatUser);
+            log.info("创建新的微信用户: wechatUserId={}, openId={}", wechatUser.getId(), openId);
         }
 
-        StpUtil.login(user.getId());
-        // 用户是否邮箱验证过
-        StpUtil.getSession().set("emailAuth", user.getEmailVerified() == 1 ? "full" : "basic");
+        // 2. 查询是否已绑定 user
+        QueryWrapper<User> userQuery = new QueryWrapper<>();
+        userQuery.eq("wechat_user_id", wechatUser.getId());
+        List<User> users = userMapper.selectList(userQuery); // 只检查有没有账户查到一个就行
 
+        if (users.isEmpty()) {
+            // #表示仅通过微信登录的临时登录标识，后续会替换为用户ID
+            StpUtil.login("#" + wechatUser.getId());
+            StpUtil.getSession().set("loginType", "wechat_only");
+
+            log.info("微信用户未绑定邮箱: wechatUserId={}", wechatUser.getId());
+            return LoginResultVO.builder()
+                    .token(StpUtil.getTokenValue())
+                    .build();
+        }
+
+        // 3. 已绑定账号，检查 last_login_user_id
+        if (users.size() == 1) {
+            // 只有一个账户，直接登录并更新 last_login_user_id
+            User user = users.getFirst();
+
+            // 更新 last_login_user_id
+            if (!user.getId().equals(wechatUser.getLastLoginUserId())) {
+                wechatUser.setLastLoginUserId(user.getId());
+                wechatUser.setUpdatedAt(LocalDateTime.now());
+                wechatUserMapper.updateById(wechatUser);
+                log.info("更新微信用户最后登录账号: wechatUserId={}, lastLoginUserId={}", wechatUser.getId(), user.getId());
+            }
+
+            StpUtil.login(user.getId());
+            StpUtil.getSession().set("loginType", "full");
+            log.info("微信登录成功: userId={}, wechatUserId={}", user.getId(), wechatUser.getId());
+
+        } else {
+            // 绑定了多个账号
+            log.info("微信用户已绑定多个账号: wechatUserId={}, 账号数量={}", wechatUser.getId(), users.size());
+
+            // 检查 last_login_user_id 是否存在且有效
+            Long lastLoginUserId = wechatUser.getLastLoginUserId();
+            if (lastLoginUserId != null) {
+                // 验证 last_login_user_id 是否在绑定列表中
+                User lastLoginUser = users.stream()
+                        .filter(u -> u.getId().equals(lastLoginUserId))
+                        .findFirst()
+                        .orElse(null);
+
+                if (lastLoginUser != null) {
+                    // 自动登录到上次登录的账号
+                    StpUtil.login(lastLoginUser.getId());
+                    StpUtil.getSession().set("loginType", "full");
+                    log.info("微信登录成功(使用上次登录账号): userId={}, wechatUserId={}", lastLoginUser.getId(), wechatUser.getId());
+
+                    return LoginResultVO.builder()
+                            .token(StpUtil.getTokenValue())
+                            .build();
+                }
+            }
+
+            // 没有 last_login_user_id 或无效，返回临时 token，需要用户通过邮箱登录一次
+            StpUtil.login("#" + wechatUser.getId());
+            StpUtil.getSession().set("loginType", "wechat_only");
+            StpUtil.getSession().set("wechatUserId", wechatUser.getId());
+
+            log.info("微信用户需要通过邮箱登录设置默认账号: wechatUserId={}", wechatUser.getId());
+        }
         return LoginResultVO.builder()
                 .token(StpUtil.getTokenValue())
                 .build();

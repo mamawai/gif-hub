@@ -41,11 +41,11 @@ public class User implements Serializable {
     private Long id;
 
     /**
-     * 微信open_id
+     * 关联的微信用户ID
      */
-    @TableField("open_id")
-    @Schema(description = "微信open_id")
-    private String openId;
+    @TableField("wechat_user_id")
+    @Schema(description = "关联的微信用户ID")
+    private Long wechatUserId;
 
     /**
      * 邮箱地址
@@ -95,4 +95,18 @@ public class User implements Serializable {
     @TableField("updated_at")
     @Schema(description = "更新时间")
     private LocalDateTime updatedAt;
+
+    /**
+     * 注册IP
+     */
+    @TableField("register_ip")
+    @Schema(description = "注册IP")
+    private String registerIp;
+
+    /**
+     * 注册时的浏览器指纹
+     */
+    @TableField("register_fingerprint")
+    @Schema(description = "注册时的浏览器指纹")
+    private String registerFingerprint;
 }

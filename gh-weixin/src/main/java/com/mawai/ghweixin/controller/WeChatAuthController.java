@@ -26,7 +26,7 @@ public class WeChatAuthController {
      * 微信登录
      *
      * @param weChatDTO 微信登录信息，包含微信授权code
-     * @return 登录结果，包含token和用户信息
+     * @return 登录结果，返回token
      */
     @RequestMapping("/login")
     public ApiResponse<LoginResultVO> login(@RequestBody WeChatDTO weChatDTO) {
