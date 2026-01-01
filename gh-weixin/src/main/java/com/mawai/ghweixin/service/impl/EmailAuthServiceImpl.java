@@ -15,6 +15,7 @@ import com.mawai.ghweixin.dto.GetIpIntelResponse;
 import com.mawai.ghweixin.service.DisposableEmailService;
 import com.mawai.ghweixin.service.GetIpIntelService;
 import com.mawai.ghweixin.service.RegistrationLimitService;
+import com.mawai.ghweixin.utils.IpUtil;
 import com.mawai.ghweixin.vo.UserInfoVO;
 import com.mawai.ghweixin.event.AccountDeleteEvent;
 import com.mawai.ghweixin.service.EmailAuthService;
@@ -235,6 +236,9 @@ public class EmailAuthServiceImpl implements EmailAuthService {
 
     @Override
     public void register(String email, String password, String verificationCode, String nickname, String clientIp, String fingerprint) {
+        // IP风险检测
+        checkIpRisk(clientIp, email);
+
         // 获取当前登录的微信用户ID（从session中）
         Long wechatUserId = (Long) StpUtil.getSession().get("wechatUserId");
         String loginType = (String) StpUtil.getSession().get("loginType");
@@ -282,6 +286,9 @@ public class EmailAuthServiceImpl implements EmailAuthService {
 
     @Override
     public LoginResultVO webRegister(String email, String password, String verificationCode, String nickname, String clientIp, String fingerprint) {
+        // IP风险检测
+        checkIpRisk(clientIp, email);
+
         // 验证验证码
         if (isVerifyFail(email, verificationCode)) {
             throw new RuntimeException("验证码错误或已过期");
@@ -399,16 +406,6 @@ public class EmailAuthServiceImpl implements EmailAuthService {
      * 公共用户创建逻辑（包含验证）
      */
     private Long createUserWithValidation(String email, String password, String nickname, Long wechatUserId, String clientIp, String fingerprint) throws Exception {
-        // IP 欺诈检测
-        if (clientIp != null) {
-            GetIpIntelResponse ipCheck = getIpIntelService.checkIp(clientIp);
-            if (ipCheck.isSuccess() && (ipCheck.getProxyScore() >= thresholdReject || ipCheck.isBadIp())) {
-                log.warn("拦截高风险 IP 注册: email={}, ip={}, score={}, badIp={}",
-                        email, clientIp, ipCheck.getProxyScore(), ipCheck.isBadIp());
-                throw new RuntimeException("检测到异常网络环境，暂时无法注册。如有疑问请联系客服。");
-            }
-        }
-
         // IP 注册数量限制
         if (!registrationLimitService.isIpAllowedToRegister(clientIp)) {
             log.warn("IP 注册次数超限: email={}, ip={}", email, clientIp);
@@ -986,6 +983,20 @@ public class EmailAuthServiceImpl implements EmailAuthService {
             wechatUserMapper.updateById(wechatUser);
             log.info("更新微信用户最后登录账号({}): wechatUserId={}, lastLoginUserId={}",
                     logContext, wechatUser.getId(), user.getId());
+        }
+    }
+
+    /**
+     * IP风险检测
+     */
+    private void checkIpRisk(String clientIp, String email) {
+        if (clientIp != null && !IpUtil.isLocalIp(clientIp)) {
+            GetIpIntelResponse ipCheck = getIpIntelService.checkIp(clientIp);
+            if (ipCheck.isSuccess() && (ipCheck.getProxyScore() >= thresholdReject || ipCheck.isBadIp())) {
+                log.warn("拦截高风险 IP 注册: email={}, ip={}, score={}, badIp={}",
+                        email, clientIp, ipCheck.getProxyScore(), ipCheck.isBadIp());
+                throw new RuntimeException("检测到异常网络环境，暂时无法注册。如有疑问请联系客服。");
+            }
         }
     }
 }

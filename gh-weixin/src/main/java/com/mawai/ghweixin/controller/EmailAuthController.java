@@ -4,6 +4,7 @@ import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.service.EmailAuthService;
+import com.mawai.ghweixin.service.ProxyCheckService;
 import com.mawai.ghweixin.utils.IpUtil;
 import com.mawai.ghweixin.vo.LoginResultVO;
 import com.mawai.ghweixin.vo.UserInfoVO;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class EmailAuthController {
 
     private final EmailAuthService emailAuthService;
+    private final ProxyCheckService proxyCheckService;
 
     /**
      * 发送验证码
@@ -313,6 +315,56 @@ public class EmailAuthController {
         } catch (Exception e) {
             log.error("重置密码失败: {}", e.getMessage(), e);
             return ApiResponse.error(500, e.getMessage());
+        }
+    }
+
+    /**
+     * IP 预检测
+     * <p>
+     * 用户访问网站时自动调用，返回 IP 的检测结果（detections）
+     *
+     * @param request HTTP 请求
+     * @return 检测结果中的 detections 字段
+     */
+    @Operation(summary = "IP 预检测", description = "检测用户 IP 的风险性（代理/VPN/Tor等）")
+    @PostMapping("/ipPreCheck")
+    public ApiResponse<ProxyCheckResponse.Detections> ipPreCheck(HttpServletRequest request) {
+        try {
+            // 获取客户端真实 IP
+            String clientIp = IpUtil.getClientIp(request);
+            log.info("IP 预检测请求: ip={}", clientIp);
+
+            // 本地 IP 跳过检测
+            if ("127.0.0.1".equals(clientIp)) {
+                log.debug("本地 IP，跳过检测");
+                ProxyCheckResponse.Detections detections = new ProxyCheckResponse.Detections();
+                return ApiResponse.success(detections);
+            }
+
+            // 调用 ProxyCheck 检测
+            ProxyCheckResponse response = proxyCheckService.checkIp(clientIp);
+
+            // 检查响应状态
+            if (response.isSuccess()) {
+                ProxyCheckResponse.IpDetails details = response.getFirstIpDetails();
+                if (details != null && details.getDetections() != null) {
+                    return ApiResponse.success(details.getDetections());
+                } else {
+                    log.warn("IP 检测返回空数据: ip={}", clientIp);
+                    return ApiResponse.error(500, "检测返回数据异常");
+                }
+            } else if (response.isDenied()) {
+                log.error("API 配额用尽: ip={}, message={}", clientIp, response.getMessage());
+                return ApiResponse.error(500, "检测服务暂时不可用");
+            } else if (response.isError()) {
+                log.error("IP 检测失败: ip={}, message={}", clientIp, response.getMessage());
+                return ApiResponse.error(500, "IP 检测失败");
+            } else {
+                return ApiResponse.error(500, "未知错误");
+            }
+        } catch (Exception e) {
+            log.error("IP 预检测异常: {}", e.getMessage(), e);
+            return ApiResponse.error(500, "IP 检测异常: " + e.getMessage());
         }
     }
 }

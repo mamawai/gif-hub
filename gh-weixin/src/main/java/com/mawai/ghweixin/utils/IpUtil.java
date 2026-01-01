@@ -66,6 +66,13 @@ public class IpUtil {
     }
 
     /**
+     * 判断是否为本地 IP（用于跳过 IP 检测）
+     */
+    public static boolean isLocalIp(String ip) {
+        return LOCALHOST_IPV4.equals(ip) || LOCALHOST_IPV6.equals(ip);
+    }
+
+    /**
      * 判断是否为本地请求
      */
     private static boolean isLocalhost(String ip) {

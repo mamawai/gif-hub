@@ -4,6 +4,7 @@ import com.mawai.ghcommon.service.CacheService;
 import com.mawai.ghweixin.config.GetIpIntelConfig;
 import com.mawai.ghweixin.dto.GetIpIntelResponse;
 import com.mawai.ghweixin.service.GetIpIntelService;
+import com.mawai.ghweixin.utils.IpUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,6 +60,12 @@ public class GetIpIntelServiceImpl implements GetIpIntelService {
 
     @Override
     public GetIpIntelResponse checkIp(String ip) {
+        // 本地 IP 跳过检测
+        if (IpUtil.isLocalIp(ip)) {
+            log.debug("本地 IP，跳过 GetIPIntel 检测");
+            return createDisabledResponse(ip);
+        }
+
         // 检查是否启用
         if (!enabled) {
             log.warn("GetIPIntel 检测已禁用，跳过检查");
