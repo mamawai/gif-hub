@@ -62,3 +62,12 @@ disposable-email:
 cloudflare:
   validation:
     enabled: ${CLOUDFLARE_VALIDATION_ENABLED}
+
+# ProxyCheck.io IP 代理检测配置
+proxycheck:
+  api-keys: ${PROXYCHECK_API_KEYS}
+  enabled: ${PROXYCHECK_ENABLED}
+  connect:
+    timeout: ${PROXYCHECK_CONNECT_TIMEOUT}
+  read:
+    timeout: ${PROXYCHECK_READ_TIMEOUT}

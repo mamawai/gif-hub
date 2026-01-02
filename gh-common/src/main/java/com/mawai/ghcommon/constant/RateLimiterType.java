@@ -1,4 +1,4 @@
-package com.mawai.ghgif.constant;
+package com.mawai.ghcommon.constant;
 
 /**
  * 限流器类型
@@ -8,5 +8,6 @@ public enum RateLimiterType {
     UPLOAD,
     VIEW,
     COMMENT,
-    UPDATE_NICKNAME
+    UPDATE_NICKNAME,
+    IP_PRE_CHECK
 }

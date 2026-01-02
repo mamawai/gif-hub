@@ -1,31 +1,32 @@
-package com.mawai.ghgif.annotation;
+package com.mawai.ghcommon.annotation;
+
+import com.mawai.ghcommon.constant.RateLimiterType;
 
 import java.lang.annotation.*;
-import com.mawai.ghgif.constant.RateLimiterType;
 
 /**
  * 限流注解
  * 基于令牌桶算法的分布式限流
- * 
+ *
  * @author mawai
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface RateLimiter {
-    
+
     /**
      * 每秒生成的令牌数 -- 一分钟1个
      * @return 令牌生成速率
      */
     double permitsPerSecond() default (1.0 / 60);
-    
+
     /**
      * 令牌桶容量
      * @return 桶容量
      */
     int bucketCapacity() default 1;
-    
+
     /**
      * 限流失败时的提示信息
      * @return 错误信息
@@ -37,5 +38,11 @@ public @interface RateLimiter {
      * @return 限流器类型
      */
     RateLimiterType type();
+
+    /**
+     * 是否全局限流（不区分用户）
+     * @return true=全局限流，false=按用户限流
+     */
+    boolean global() default false;
 }
 

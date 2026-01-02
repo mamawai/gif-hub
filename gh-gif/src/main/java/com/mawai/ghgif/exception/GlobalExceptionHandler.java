@@ -2,6 +2,7 @@ package com.mawai.ghgif.exception;
 
 import cn.dev33.satoken.exception.NotLoginException;
 import com.mawai.ghcommon.domain.ApiResponse;
+import com.mawai.ghcommon.exception.RateLimitException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;

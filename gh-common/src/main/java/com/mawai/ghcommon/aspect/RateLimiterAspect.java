@@ -1,9 +1,9 @@
-package com.mawai.ghgif.aspect;
+package com.mawai.ghcommon.aspect;
 
-import com.mawai.ghgif.annotation.RateLimiter;
-import com.mawai.ghgif.constant.RateLimiterType;
-import com.mawai.ghgif.config.ThreadPoolConfig;
-import com.mawai.ghgif.exception.RateLimitException;
+import com.mawai.ghcommon.annotation.RateLimiter;
+import com.mawai.ghcommon.constant.RateLimiterType;
+import com.mawai.ghcommon.exception.RateLimitException;
+import com.mawai.ghcommon.utils.AsyncContextHolder;
 
 import cn.dev33.satoken.stp.StpUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -22,8 +22,6 @@ import java.util.Collections;
 /**
  * 限流切面
  * 基于令牌桶算法的分布式限流拦截器
- * 
- * @author mawai
  */
 @Aspect
 @Component
@@ -35,79 +33,60 @@ public class RateLimiterAspect {
 
     public RateLimiterAspect(StringRedisTemplate stringRedisTemplate) throws Exception {
         this.stringRedisTemplate = stringRedisTemplate;
-        
+
         // 加载Lua脚本
         this.rateLimiterScript = new DefaultRedisScript<>();
         this.rateLimiterScript.setResultType(Long.class);
         String scriptText = StreamUtils.copyToString(
-                new ClassPathResource("lua/token_bucket.lua").getInputStream(), 
+                new ClassPathResource("lua/token_bucket.lua").getInputStream(),
                 StandardCharsets.UTF_8);
         this.rateLimiterScript.setScriptText(scriptText);
-        
+
         log.info("RateLimiterAspect initialized with token bucket lua script");
     }
 
-    /**
-     * 拦截带有@RateLimiter注解的方法
-     *
-     * @param joinPoint 切入点
-     * @param rateLimiter 限流注解
-     * @return 方法执行结果
-     * @throws Throwable 异常
-     */
     @Around("@annotation(rateLimiter)")
     public Object around(ProceedingJoinPoint joinPoint, RateLimiter rateLimiter) throws Throwable {
         try {
-            // 获取限流key
-            String key = getLimiterKey(rateLimiter.type());
+            String key = getLimiterKey(rateLimiter.type(), rateLimiter.global());
             double permitsPerSecond = rateLimiter.permitsPerSecond();
             int bucketCapacity = rateLimiter.bucketCapacity();
-            long now = System.currentTimeMillis(); // 使用毫秒时间戳
-            
-            // 执行Lua脚本进行限流判断
+            long now = System.currentTimeMillis();
+
             Long result = stringRedisTemplate.execute(
                     rateLimiterScript,
                     Collections.singletonList(key),
                     String.valueOf(permitsPerSecond),
                     String.valueOf(bucketCapacity),
                     String.valueOf(now),
-                    "1"  // 请求1个令牌
+                    "1"
             );
 
             if (result != 1) {
-                // 限流被拒绝
-                log.warn("Rate limit exceeded for key: {}, method: {}", 
+                log.warn("Rate limit exceeded for key: {}, method: {}",
                         key, joinPoint.getSignature().toShortString());
                 throw new RateLimitException(rateLimiter.message());
             }
         } catch (RateLimitException e) {
-            // 重新抛出限流异常
             throw e;
         } catch (Exception e) {
-            // 只捕获限流器本身的异常（如Redis连接失败等）
             log.error("Rate limiter execution failed", e);
-            // 发生异常时，为了安全起见，拒绝请求
             throw new RateLimitException("系统异常，请稍后再试");
         }
-        
-        // 限流通过后，执行目标方法
-        // 目标方法的异常会正常向上抛出，不会被包装成限流异常
+
         return joinPoint.proceed();
     }
 
-    /**
-     * 获取限流key
-     * @param type 限流器类型
-     * @return 限流器key
-     */
-    private static String getLimiterKey(RateLimiterType type) {
+    private static String getLimiterKey(RateLimiterType type, boolean global) {
+        if (global) {
+            return "limiter:" + type.name() + ":global";
+        }
+
         String loginId = null;
-        // 尝试从当前线程获取登录id
         try {
             if (StpUtil.isLogin()) loginId = StpUtil.getLoginIdAsString();
         } catch (Exception e) {
-            // 如果异常说明是新线程上传，则使用ThreadLocal获取登录id
-            loginId = ThreadPoolConfig.CustomTaskDecorator.getAsyncLoginId();
+            loginId = AsyncContextHolder.getAsyncLoginId();
         }
 
         if (loginId == null || loginId.isBlank()) {

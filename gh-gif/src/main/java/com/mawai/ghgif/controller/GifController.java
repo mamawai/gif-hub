@@ -2,11 +2,11 @@ package com.mawai.ghgif.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import com.mawai.ghcommon.domain.ApiResponse;
+import com.mawai.ghcommon.exception.RateLimitException;
 import com.mawai.ghgif.dto.BatchGifUploadDTO;
 import com.mawai.ghgif.dto.GifDTO;
 import com.mawai.ghgif.dto.GiphyDTO;
 import com.mawai.ghgif.dto.LikeRequestDTO;
-import com.mawai.ghgif.exception.RateLimitException;
 import com.mawai.ghgif.service.GifProcessService;
 import com.mawai.ghgif.service.ValidationService;
 import com.mawai.ghgif.vo.GifVO;

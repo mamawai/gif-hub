@@ -1,6 +1,8 @@
 package com.mawai.ghweixin.controller;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import com.mawai.ghcommon.annotation.RateLimiter;
+import com.mawai.ghcommon.constant.RateLimiterType;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.service.EmailAuthService;
@@ -327,6 +329,13 @@ public class EmailAuthController {
      * @return 检测结果中的 detections 字段
      */
     @Operation(summary = "IP 预检测", description = "检测用户 IP 的风险性（代理/VPN/Tor等）")
+    @RateLimiter(
+        type = RateLimiterType.IP_PRE_CHECK,
+        permitsPerSecond = 10.0 / 60,
+        bucketCapacity = 10,
+        message = "IP检测请求过于频繁，请稍后再试",
+        global = true
+    )
     @PostMapping("/ipPreCheck")
     public ApiResponse<ProxyCheckResponse.Detections> ipPreCheck(HttpServletRequest request) {
         try {

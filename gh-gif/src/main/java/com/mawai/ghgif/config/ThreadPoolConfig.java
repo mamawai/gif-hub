@@ -1,11 +1,10 @@
 package com.mawai.ghgif.config;
 
-import cn.dev33.satoken.stp.StpUtil;
+import com.mawai.ghcommon.utils.AsyncContextHolder;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.TaskDecorator;
 import org.springframework.lang.NonNull;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -81,66 +80,14 @@ public class ThreadPoolConfig {
      * 用于在虚拟线程中传递登录信息等上下文
      */
     public static class VirtualThreadTaskExecutor implements Executor {
-        private final TaskDecorator taskDecorator = new CustomTaskDecorator();
+        private final AsyncContextHolder.CustomTaskDecorator taskDecorator = new AsyncContextHolder.CustomTaskDecorator();
 
         @Override
         public void execute(@NonNull Runnable command) {
-            // 应用任务装饰器，传递登录信息
             Runnable decoratedTask = taskDecorator.decorate(command);
-            // 在虚拟线程中执行任务
             Thread.ofVirtual()
                 .name("virtual-file-upload-", 0)
                 .start(decoratedTask);
-        }
-    }
-
-    /**
-     * 用于在异步线程中传递登录信息的ThreadLocal
-     */
-    private static final ThreadLocal<String> ASYNC_LOGIN_ID = new ThreadLocal<>();
-
-    /**
-     * 自定义任务装饰器，用于传递登录信息到异步线程
-     */
-    public static class CustomTaskDecorator implements TaskDecorator {
-        @Override
-        @NonNull
-        public Runnable decorate(@NonNull Runnable runnable) {
-            // 在主线程中获取当前登录信息和请求上下文
-            String loginId = null;
-            try {
-                // 获取当前登录的用户ID和token
-                if (StpUtil.isLogin()) {
-                    loginId = StpUtil.getLoginIdAsString();
-                }
-            } catch (Exception e) {
-                // 如果获取失败，可能是因为当前线程没有登录信息或请求上下文（也就是不需要上下文），忽略即可
-                log.warn("CustomTaskDecorator: 获取主线程上下文失败", e);
-            }
-            final String finalLoginId = loginId;
-            return () -> {
-                try {
-                    // 在异步线程中设置登录信息到ThreadLocal
-                    if (finalLoginId != null) ASYNC_LOGIN_ID.set(finalLoginId);
-                    // 执行原始任务
-                    runnable.run();
-                } finally {
-                    // 清理当前线程的上下文信息
-                    try {
-                        ASYNC_LOGIN_ID.remove();
-                    } catch (Exception e) {
-                        log.warn("CustomTaskDecorator: 清理子线程上下文信息失败", e);
-                    }
-                }
-            };
-        }
-        
-        /**
-         * 在异步线程中获取登录ID
-         * @return 登录用户ID，如果未设置则返回null
-         */
-        public static String getAsyncLoginId() {
-            return ASYNC_LOGIN_ID.get();
         }
     }
     
