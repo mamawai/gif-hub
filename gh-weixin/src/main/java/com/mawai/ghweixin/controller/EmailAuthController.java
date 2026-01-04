@@ -117,8 +117,6 @@ public class EmailAuthController {
             log.info("Web端用户注册请求: email={}, ip={}, fingerprint={}",
                     registerDTO.getEmail(), clientIp, registerDTO.getFingerprint());
 
-            validateTurnstile(registerDTO.getTurnstileToken(), clientIp, registerDTO.getEmail());
-
             // Web端独立注册（不需要微信登录）
             LoginResultVO result = emailAuthService.webRegister(
                     registerDTO.getEmail(),
@@ -163,15 +161,12 @@ public class EmailAuthController {
      * Web端登录（支持密码和验证码两种方式）
      *
      * @param loginDTO 登录信息
-     * @param request HTTP请求
      * @return 登录结果（包含token）
      */
     @Operation(summary = "Web端登录", description = "Web端通过邮箱+密码或邮箱+验证码登录")
     @PostMapping("/web/login")
-    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO, HttpServletRequest request) {
+    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO) {
         try {
-            validateTurnstile(loginDTO.getTurnstileToken(), IpUtil.getClientIp(request), loginDTO.getEmail());
-
             LoginResultVO result;
             if (loginDTO.getLoginType() == 1) {
                 // 密码登录
