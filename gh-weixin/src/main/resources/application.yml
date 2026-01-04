@@ -63,6 +63,11 @@ cloudflare:
   validation:
     enabled: ${CLOUDFLARE_VALIDATION_ENABLED}
 
+# Turnstile 配置
+turnstile:
+  secret-key: ${TURNSTILE_SECRET_KEY}
+  enabled: ${TURNSTILE_ENABLED}
+
 # ProxyCheck.io IP 代理检测配置
 proxycheck:
   api-keys: ${PROXYCHECK_API_KEYS}

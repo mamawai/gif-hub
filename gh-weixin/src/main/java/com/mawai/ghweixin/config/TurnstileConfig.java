@@ -1,35 +1,31 @@
 package com.mawai.ghweixin.config;
 
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.List;
-
-/**
- * ProxyCheck.io API 配置类
- * 用于配置 IP 代理检测服务
- */
+@Slf4j
 @Getter
 @Configuration
-public class ProxyCheckConfig extends BaseRestTemplateConfig {
+public class TurnstileConfig extends BaseRestTemplateConfig {
 
-    @Value("${proxycheck.api-keys}")
-    private List<String> apiKeys;
+    @Value("${turnstile.secret-key}")
+    private String secretKey;
 
-    @Value("${proxycheck.enabled}")
+    @Value("${turnstile.enabled:true}")
     private boolean enabled;
 
-    @Value("${proxycheck.connect.timeout}")
+    @Value("${turnstile.connect-timeout:3000}")
     private int connectTimeout;
 
-    @Value("${proxycheck.read.timeout}")
+    @Value("${turnstile.read-timeout:5000}")
     private int readTimeout;
 
-    @Bean(name = "proxyCheckRestTemplate")
-    public RestTemplate proxyCheckRestTemplate() {
+    @Bean(name = "turnstileRestTemplate")
+    public RestTemplate turnstileRestTemplate() {
         return createRestTemplate(connectTimeout, readTimeout);
     }
 }

@@ -22,7 +22,10 @@ public class EmailLoginDTO {
     
     @Schema(description = "验证码（验证码登录时需要）")
     private String verificationCode;
-    
+
     @Schema(description = "登录类型：1-密码登录，2-验证码登录", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer loginType;
+
+    @Schema(description = "Turnstile验证token", requiredMode = Schema.RequiredMode.REQUIRED)
+    private String turnstileToken;
 } 

@@ -5,9 +5,12 @@ import com.mawai.ghcommon.annotation.RateLimiter;
 import com.mawai.ghcommon.constant.RateLimiterType;
 import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
+import com.mawai.ghweixin.dto.TurnstileResponse;
 import com.mawai.ghweixin.service.EmailAuthService;
 import com.mawai.ghweixin.service.ProxyCheckService;
+import com.mawai.ghweixin.service.TurnstileService;
 import com.mawai.ghweixin.utils.IpUtil;
+import com.mawai.ghweixin.utils.TurnstileErrorMapper;
 import com.mawai.ghweixin.vo.LoginResultVO;
 import com.mawai.ghweixin.vo.UserInfoVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,6 +32,20 @@ public class EmailAuthController {
 
     private final EmailAuthService emailAuthService;
     private final ProxyCheckService proxyCheckService;
+    private final TurnstileService turnstileService;
+
+    /**
+     * 验证 Turnstile token
+     */
+    private void validateTurnstile(String token, String clientIp, String email) {
+        TurnstileResponse response = turnstileService.validateToken(token, clientIp);
+        if (!response.isSuccess()) {
+            String errorMsg = TurnstileErrorMapper.getErrorMessage(response.getErrorCodes());
+            log.warn("Turnstile验证失败: email={}, ip={}, errors={}, message={}",
+                    email, clientIp, response.getErrorCodes(), errorMsg);
+            throw new RuntimeException(errorMsg);
+        }
+    }
 
     /**
      * 发送验证码
@@ -100,6 +117,8 @@ public class EmailAuthController {
             log.info("Web端用户注册请求: email={}, ip={}, fingerprint={}",
                     registerDTO.getEmail(), clientIp, registerDTO.getFingerprint());
 
+            validateTurnstile(registerDTO.getTurnstileToken(), clientIp, registerDTO.getEmail());
+
             // Web端独立注册（不需要微信登录）
             LoginResultVO result = emailAuthService.webRegister(
                     registerDTO.getEmail(),
@@ -120,12 +139,18 @@ public class EmailAuthController {
      * Web端发送验证码
      *
      * @param email 邮箱地址
+     * @param turnstileToken Turnstile验证token
+     * @param request HTTP请求
      * @return 发送结果
      */
     @Operation(summary = "Web端发送验证码", description = "Web端向已注册邮箱发送验证码")
     @PostMapping("/web/code")
-    public ApiResponse<Boolean> sendWebVerificationCode(@RequestParam String email) {
+    public ApiResponse<Boolean> sendWebVerificationCode(
+            @RequestParam String email,
+            @RequestParam String turnstileToken,
+            HttpServletRequest request) {
         try {
+            validateTurnstile(turnstileToken, IpUtil.getClientIp(request), email);
             boolean result = emailAuthService.sendWebVerificationCode(email);
             return ApiResponse.success(result);
         } catch (Exception e) {
@@ -138,12 +163,15 @@ public class EmailAuthController {
      * Web端登录（支持密码和验证码两种方式）
      *
      * @param loginDTO 登录信息
+     * @param request HTTP请求
      * @return 登录结果（包含token）
      */
     @Operation(summary = "Web端登录", description = "Web端通过邮箱+密码或邮箱+验证码登录")
     @PostMapping("/web/login")
-    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO) {
+    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO, HttpServletRequest request) {
         try {
+            validateTurnstile(loginDTO.getTurnstileToken(), IpUtil.getClientIp(request), loginDTO.getEmail());
+
             LoginResultVO result;
             if (loginDTO.getLoginType() == 1) {
                 // 密码登录
@@ -284,12 +312,18 @@ public class EmailAuthController {
      * 发送重置密码验证码
      *
      * @param email 邮箱地址
+     * @param turnstileToken Turnstile验证token
+     * @param request HTTP请求
      * @return 发送结果
      */
     @Operation(summary = "发送重置密码验证码", description = "向已注册邮箱发送重置密码验证码")
     @PostMapping("/reset-password/code")
-    public ApiResponse<Boolean> sendResetPasswordCode(@RequestParam String email) {
+    public ApiResponse<Boolean> sendResetPasswordCode(
+            @RequestParam String email,
+            @RequestParam String turnstileToken,
+            HttpServletRequest request) {
         try {
+            validateTurnstile(turnstileToken, IpUtil.getClientIp(request), email);
             boolean result = emailAuthService.sendResetPasswordCode(email);
             return ApiResponse.success(result);
         } catch (Exception e) {

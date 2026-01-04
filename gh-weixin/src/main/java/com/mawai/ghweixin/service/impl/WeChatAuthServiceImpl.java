@@ -6,30 +6,39 @@ import com.mawai.ghmbplus.dao.WechatUserMapper;
 import com.mawai.ghmbplus.model.User;
 import com.mawai.ghmbplus.model.WechatUser;
 import com.mawai.ghweixin.service.WeChatAuthService;
-import com.mawai.ghweixin.utils.HttpClientUtil;
 import com.mawai.ghweixin.vo.LoginResultVO;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class WeChatAuthServiceImpl implements WeChatAuthService {
 
     private final UserMapper userMapper;
     private final WechatUserMapper wechatUserMapper;
+    private final RestTemplate restTemplate;
+
+    public WeChatAuthServiceImpl(
+            UserMapper userMapper,
+            WechatUserMapper wechatUserMapper,
+            @Qualifier("weChatRestTemplate") RestTemplate restTemplate) {
+        this.userMapper = userMapper;
+        this.wechatUserMapper = wechatUserMapper;
+        this.restTemplate = restTemplate;
+    }
 
     @Value("${wechat.appId}")
     private String WECHAT_APP_ID;
@@ -140,12 +149,14 @@ public class WeChatAuthServiceImpl implements WeChatAuthService {
      * @return 用户openId
      */
     private String getOpenId(String code) {
-        HashMap<String, String> params = new HashMap<>();
-        params.put("appid", WECHAT_APP_ID);
-        params.put("secret", WECHAT_SECRET);
-        params.put("js_code", code);
-        params.put("grant_type", GRANT_TYPE);
-        String result = HttpClientUtil.doGet(WECHAT_LOGIN_URL, params);
+        String url = UriComponentsBuilder.fromUriString(WECHAT_LOGIN_URL)
+                .queryParam("appid", WECHAT_APP_ID)
+                .queryParam("secret", WECHAT_SECRET)
+                .queryParam("js_code", code)
+                .queryParam("grant_type", GRANT_TYPE)
+                .toUriString();
+
+        String result = restTemplate.getForObject(url, String.class);
         JSONObject jsonObject = JSONUtil.parseObj(result);
         log.info("微信登录结果jsonObject: {}", jsonObject);
         return jsonObject.getStr("openid");

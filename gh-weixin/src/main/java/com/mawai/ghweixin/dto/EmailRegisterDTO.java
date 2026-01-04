@@ -28,4 +28,7 @@ public class EmailRegisterDTO {
 
     @Schema(description = "浏览器指纹--虽然不可信")
     private String fingerprint;
+
+    @Schema(description = "Turnstile验证token", requiredMode = Schema.RequiredMode.REQUIRED)
+    private String turnstileToken;
 } 
