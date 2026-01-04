@@ -161,14 +161,16 @@ public class EmailAuthController {
      * Web端登录（支持密码和验证码两种方式）
      *
      * @param loginDTO 登录信息
+     * @param request HTTP请求
      * @return 登录结果（包含token）
      */
     @Operation(summary = "Web端登录", description = "Web端通过邮箱+密码或邮箱+验证码登录")
     @PostMapping("/web/login")
-    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO) {
+    public ApiResponse<LoginResultVO> webLogin(@RequestBody EmailLoginDTO loginDTO, HttpServletRequest request) {
         try {
             LoginResultVO result;
             if (loginDTO.getLoginType() == 1) {
+                validateTurnstile(loginDTO.getTurnstileToken(), IpUtil.getClientIp(request), loginDTO.getEmail());
                 // 密码登录
                 result = emailAuthService.webLogin(loginDTO.getEmail(), loginDTO.getPassword(), null);
             } else if (loginDTO.getLoginType() == 2) {
