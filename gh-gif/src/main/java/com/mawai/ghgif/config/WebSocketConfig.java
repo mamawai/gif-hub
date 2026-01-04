@@ -48,13 +48,19 @@ import java.util.concurrent.Executors;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     /**
-     * WebSocket 心跳专用虚拟线程调度器
+     * 虚拟线程任务调度器
+     *
+     * <p>用途：</p>
+     * <ul>
+     *   <li>WebSocket 心跳检测（每个连接在独立虚拟线程中执行）</li>
+     *   <li>@Scheduled 定时任务触发（轻量级触发操作）</li>
+     * </ul>
      *
      * <p>设计说明：</p>
      * <ul>
-     *   <li>使用虚拟线程处理心跳任务，每个连接的心跳在独立虚拟线程中执行</li>
-     *   <li>只需 1 个平台线程作为调度器，内存占用 ~1MB</li>
+     *   <li>使用虚拟线程，只需 1 个平台线程作为调度器，内存占用 ~1MB</li>
      *   <li>支持数万并发连接，单个连接阻塞不影响其他连接</li>
+     *   <li>@Scheduled 方法只做触发，真正的任务在 scheduledExecutor 中执行</li>
      *   <li>通过 shutdown hook 管理生命周期，应用关闭时自动清理资源</li>
      * </ul>
      *
@@ -64,8 +70,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
      *   <li>虚拟线程方案: 心跳延迟 0-50ms，完全隔离，内存占用相同</li>
      * </ul>
      */
-    @Bean
-    public TaskScheduler webSocketTaskScheduler() {
+    @Bean("taskScheduler")
+    public TaskScheduler taskScheduler() {
         // 创建虚拟线程工厂，每个心跳任务在独立虚拟线程中执行
         var virtualThreadFactory = Thread.ofVirtual()
                 .name("ws-heartbeat-", 0)
@@ -103,8 +109,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // /queue 前缀用于点对点消息（通知推送）
         // /topic 前缀用于广播消息,当前系统未使用(预留)
         config.enableSimpleBroker("/topic", "/queue")
-              .setTaskScheduler(webSocketTaskScheduler())  // 使用虚拟线程调度器
-              .setHeartbeatValue(new long[]{10000, 10000});  // 心跳间隔 10秒
+              .setTaskScheduler(taskScheduler())
+              .setHeartbeatValue(new long[]{10000, 10000});
 
         // 注意：移除了以下未使用的配置
         // - setApplicationDestinationPrefixes: 用于接收客户端消息，当前系统只推送不接收
