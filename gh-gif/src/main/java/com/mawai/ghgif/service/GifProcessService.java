@@ -166,4 +166,12 @@ public interface GifProcessService {
      * @return 最新GIF列表
      */
     List<GifVO> getLatestGifs(Long lastId, Integer pageSize);
+
+    /**
+     * 获取用户指定分类下的GIF数量
+     *
+     * @param categoryId 分类ID
+     * @return GIF数量
+     */
+    Long getNumberOfGifsInCategory(Long categoryId);
 }

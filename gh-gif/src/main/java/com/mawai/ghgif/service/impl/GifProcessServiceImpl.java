@@ -1,5 +1,6 @@
 package com.mawai.ghgif.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -1102,6 +1103,22 @@ public class GifProcessServiceImpl implements GifProcessService {
         mergeAllRealTimeCounts(resList);
         
         return resList;
+    }
+
+    /**
+     * 获取用户某个收藏的GIF数量
+     *
+     * @param categoryId 收藏的分类ID
+     * @return GIF数量
+     */
+    @Override
+    public Long getNumberOfGifsInCategory(Long categoryId) {
+        long userId = StpUtil.getLoginIdAsLong();
+        return userLikeService.count(
+                new LambdaQueryWrapper<UserLike>()
+                        .eq(UserLike::getUserId, userId)
+                        .eq(UserLike::getUserLikeCategoryId, categoryId)
+        );
     }
 
 }

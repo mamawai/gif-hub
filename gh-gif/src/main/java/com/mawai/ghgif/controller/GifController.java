@@ -391,5 +391,22 @@ public class GifController {
             return ApiResponse.error(500, "获取最新GIF列表失败：" + e.getMessage());
         }
     }
+
+    /**
+     * 查询用户指定分类下的gif数量
+     *
+     * @param categoryId 分类ID
+     * @return 分类gif数量
+     */
+    @Operation(summary = "查询用户指定分类下的gif数量", description = "查询用户指定分类下的gif数量")
+    @GetMapping("/category/{categoryId}/num")
+    public ApiResponse<Long> getNumberOfGifsInCategory(@PathVariable Long categoryId) {
+        try {
+            Long numberOfGifs = gifProcessService.getNumberOfGifsInCategory(categoryId);
+            return ApiResponse.success(numberOfGifs);
+        } catch (Exception e) {
+            return ApiResponse.error(500, "查询分类gif数量失败: " + e.getMessage());
+        }
+    }
     
 }
