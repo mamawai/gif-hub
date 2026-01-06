@@ -30,7 +30,8 @@ public class SaTokenConfig extends BaseSaTokenConfig {
             "/user/web/login",
             "/user/reset-password/code",
             "/user/reset-password",
-            "/user/ipPreCheck"
+            "/user/ipPreCheck",
+            "/user/oauth/linuxdo/callback"
     );
 
     /**

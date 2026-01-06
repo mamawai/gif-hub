@@ -7,6 +7,7 @@ import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.dto.TurnstileResponse;
 import com.mawai.ghweixin.service.EmailAuthService;
+import com.mawai.ghweixin.service.LinuxDoOAuthService;
 import com.mawai.ghweixin.service.ProxyCheckService;
 import com.mawai.ghweixin.service.TurnstileService;
 import com.mawai.ghweixin.utils.IpUtil;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 public class EmailAuthController {
 
     private final EmailAuthService emailAuthService;
+    private final LinuxDoOAuthService linuxDoOAuthService;
     private final ProxyCheckService proxyCheckService;
     private final TurnstileService turnstileService;
 
@@ -405,6 +407,32 @@ public class EmailAuthController {
         } catch (Exception e) {
             log.error("IP 预检测异常: {}", e.getMessage(), e);
             return ApiResponse.error(500, "IP 检测异常: " + e.getMessage());
+        }
+    }
+
+    /**
+     * LinuxDo OAuth 回调
+     *
+     * @param dto     回调参数
+     * @param request HTTP请求
+     * @return 登录结果
+     */
+    @Operation(summary = "LinuxDo OAuth回调", description = "处理LinuxDo OAuth授权回调")
+    @PostMapping("/oauth/linuxdo/callback")
+    public ApiResponse<LoginResultVO> linuxDoCallback(@RequestBody LinuxDoCallbackDTO dto, HttpServletRequest request) {
+        try {
+            String clientIp = IpUtil.getClientIp(request);
+            log.info("LinuxDo OAuth回调: ip={}, fingerprint={}", clientIp, dto.getFingerprint());
+
+            LoginResultVO result = linuxDoOAuthService.handleCallback(
+                    dto.getCode(),
+                    dto.getFingerprint(),
+                    clientIp
+            );
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("LinuxDo OAuth回调失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, "LinuxDo登录失败: " + e.getMessage());
         }
     }
 }

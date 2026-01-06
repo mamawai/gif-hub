@@ -76,3 +76,9 @@ proxycheck:
     timeout: ${PROXYCHECK_CONNECT_TIMEOUT}
   read:
     timeout: ${PROXYCHECK_READ_TIMEOUT}
+
+# LinuxDo OAuth 配置
+linuxdo:
+  client-id: ${LINUXDO_CLIENT_ID}
+  client-secret: ${LINUXDO_CLIENT_SECRET}
+  redirect-uri: ${LINUXDO_REDIRECT_URI}
