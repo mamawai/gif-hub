@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinuxDo 邀请码</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #09090b;
+            --surface: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.06);
+            --border: rgba(255, 255, 255, 0.08);
+            --text: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #52525b;
+            --accent: #a855f7;
+            --accent-secondary: #6366f1;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                linear-gradient(rgba(168, 85, 247, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(168, 85, 247, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(168, 85, 247, 0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 420px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .card {
+            background: var(--surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 40px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            border-radius: 16px;
+            margin-bottom: 20px;
+            font-size: 24px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(to right, var(--text), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-dot.offline {
+            background: var(--error);
+            box-shadow: 0 0 8px var(--error);
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .input {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 15px;
+            transition: all 0.2s ease;
+        }
+
+        .input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15);
+        }
+
+        .input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover:not(:disabled)::before {
+            opacity: 1;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px -8px rgba(168, 85, 247, 0.5);
+        }
+
+        .btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-loading {
+            color: transparent;
+        }
+
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .message {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            margin-top: 16px;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .message.show { display: block; }
+
+        .message.success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+
+        .message.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--error);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .code-display {
+            display: none;
+            text-align: center;
+            padding: 24px 0;
+        }
+
+        .code-display.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .code-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
+        .code-value {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            padding: 20px 28px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(99, 102, 241, 0.1));
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 16px;
+            display: inline-block;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background-clip: padding-box;
+        }
+
+        .code-value:hover {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(99, 102, 241, 0.15));
+            transform: scale(1.02);
+        }
+
+        .code-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 12px;
+        }
+
+        .code-value.copied + .code-hint {
+            color: var(--success);
+        }
+
+        .rules {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+
+        .rules-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .rules-list {
+            list-style: none;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .rules-list li {
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .rules-list li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            transform: translateY(-50%);
+            opacity: 0.5;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .footer a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer a:hover {
+            color: var(--accent);
+        }
+
+        @media (max-width: 480px) {
+            .card { padding: 32px 24px; }
+            .title { font-size: 22px; }
+            .code-value { font-size: 26px; letter-spacing: 2px; padding: 16px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <div class="logo">L</div>
+                <h1 class="title">LinuxDo 邀请码</h1>
+                <p class="subtitle">仅限 edu.cn 教育邮箱申请</p>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">检查库存中...</span>
+            </div>
+
+            <div id="applyForm">
+                <div class="form-group">
+                    <label class="label">邮箱地址</label>
+                    <input
+                        type="email"
+                        class="input"
+                        id="emailInput"
+                        placeholder="your@university.edu.cn"
+                        autocomplete="email"
+                    >
+                </div>
+
+                <button class="btn" id="submitBtn" disabled>
+                    <span id="btnText">申请邀请码</span>
+                </button>
+            </div>
+
+            <div class="code-display" id="codeDisplay">
+                <div class="code-label">你的邀请码</div>
+                <div class="code-value" id="codeValue" onclick="copyCode()"></div>
+                <div class="code-hint" id="codeHint">点击复制</div>
+            </div>
+
+            <div class="message" id="message"></div>
+
+            <div class="rules">
+                <div class="rules-title">申请规则</div>
+                <ul class="rules-list">
+                    <li>本站申请规则不代表linuxdo社区申请规则！仅提供邀请链接！详细信息请去官网查看！</li>
+                    <li>仅支持 .edu.cn 教育邮箱</li>
+                    <li>每个邮箱限领一次</li>
+                    <li>单数日期开放申请</li>
+                    <li>验证链接 30 分钟内有效</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <a href="https://linux.do" target="_blank">linux.do</a> · 技术社区
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/user';
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const emailInput = document.getElementById('emailInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+        const message = document.getElementById('message');
+        const applyForm = document.getElementById('applyForm');
+        const codeDisplay = document.getElementById('codeDisplay');
+        const codeValue = document.getElementById('codeValue');
+        const codeHint = document.getElementById('codeHint');
+
+        let isLoading = false;
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get('token');
+
+            if (token) {
+                await verifyToken(token);
+            } else {
+                await checkStatus();
+            }
+        });
+
+        async function checkStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/linuxdo/invite/status`);
+                const data = await res.json();
+
+                if (data.status === 200 && data.data === true) {
+                    statusDot.className = 'status-dot';
+                    statusText.textContent = '邀请码充足';
+                    submitBtn.disabled = false;
+                } else {
+                    statusDot.className = 'status-dot offline';
+                    statusText.textContent = '暂无库存';
+                    submitBtn.disabled = true;
+                }
+            } catch (e) {
+                statusDot.className = 'status-dot offline';
+                statusText.textContent = '网络错误';
+            }
+        }
+
+        async function verifyToken(token) {
+            statusText.textContent = '验证中...';
+            applyForm.style.display = 'none';
+
+            try {
+                const res = await fetch(`${API_BASE}/linuxdo/invite/verify?token=${encodeURIComponent(token)}`);
+                const data = await res.json();
+
+                if (data.status === 200 && data.data) {
+                    statusDot.className = 'status-dot';
+                    statusText.textContent = '验证成功';
+                    codeValue.textContent = data.data;
+                    codeDisplay.classList.add('show');
+                    showMessage('success', '邀请码领取成功，请妥善保管');
+                } else {
+                    statusDot.className = 'status-dot offline';
+                    statusText.textContent = '验证失败';
+                    showMessage('error', data.message || '链接已失效或无效');
+                    applyForm.style.display = 'block';
+                    await checkStatus();
+                }
+            } catch (e) {
+                statusDot.className = 'status-dot offline';
+                statusText.textContent = '网络错误';
+                showMessage('error', '网络错误，请刷新重试');
+                applyForm.style.display = 'block';
+            }
+        }
+
+        async function submitApply() {
+            const email = emailInput.value.trim();
+
+            if (!email) {
+                showMessage('error', '请输入邮箱地址');
+                return;
+            }
+
+            if (!/^[\w.-]+@[\w.-]+\.edu\.cn$/i.test(email)) {
+                showMessage('error', '仅支持 edu.cn 教育邮箱');
+                return;
+            }
+
+            if (isLoading) return;
+            isLoading = true;
+            submitBtn.disabled = true;
+            submitBtn.classList.add('btn-loading');
+
+            try {
+                const res = await fetch(`${API_BASE}/linuxdo/invite/apply?email=${encodeURIComponent(email)}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+
+                if (data.code === 200) {
+                    showMessage('success', '申请成功，请查收邮件并点击验证链接');
+                    emailInput.disabled = true;
+                    btnText.textContent = '已发送';
+                } else {
+                    showMessage('error', data.message || '申请失败');
+                    submitBtn.disabled = false;
+                }
+            } catch (e) {
+                showMessage('error', '网络错误，请稍后重试');
+                submitBtn.disabled = false;
+            } finally {
+                isLoading = false;
+                submitBtn.classList.remove('btn-loading');
+            }
+        }
+
+        function showMessage(type, text) {
+            message.className = `message ${type} show`;
+            message.textContent = text;
+        }
+
+        function copyCode() {
+            const code = codeValue.textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                codeValue.classList.add('copied');
+                codeHint.textContent = '已复制';
+                setTimeout(() => {
+                    codeValue.classList.remove('copied');
+                    codeHint.textContent = '点击复制';
+                }, 2000);
+            });
+        }
+
+        submitBtn.addEventListener('click', submitApply);
+        emailInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitApply();
+        });
+    </script>
+</body>
+</html>

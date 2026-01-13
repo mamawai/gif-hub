@@ -9,5 +9,7 @@ public enum RateLimiterType {
     VIEW,
     COMMENT,
     UPDATE_NICKNAME,
-    IP_PRE_CHECK
+    IP_PRE_CHECK,
+    LINUXDO_INVITE_APPLY,
+    LINUXDO_INVITE_STATUS
 }

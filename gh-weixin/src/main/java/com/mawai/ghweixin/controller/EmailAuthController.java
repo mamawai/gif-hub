@@ -7,6 +7,7 @@ import com.mawai.ghcommon.domain.ApiResponse;
 import com.mawai.ghweixin.dto.*;
 import com.mawai.ghweixin.dto.TurnstileResponse;
 import com.mawai.ghweixin.service.EmailAuthService;
+import com.mawai.ghweixin.service.LinuxDoInviteService;
 import com.mawai.ghweixin.service.LinuxDoOAuthService;
 import com.mawai.ghweixin.service.ProxyCheckService;
 import com.mawai.ghweixin.service.TurnstileService;
@@ -33,6 +34,7 @@ public class EmailAuthController {
 
     private final EmailAuthService emailAuthService;
     private final LinuxDoOAuthService linuxDoOAuthService;
+    private final LinuxDoInviteService linuxDoInviteService;
     private final ProxyCheckService proxyCheckService;
     private final TurnstileService turnstileService;
 
@@ -433,6 +435,67 @@ public class EmailAuthController {
         } catch (Exception e) {
             log.error("LinuxDo OAuth回调失败: {}", e.getMessage(), e);
             return ApiResponse.error(500, "LinuxDo登录失败: " + e.getMessage());
+        }
+    }
+    /**
+     * LinuxDo 邀请码库存状态
+     *
+     * @return true=有库存，false=无库存
+     */
+    @Operation(summary = "LinuxDo邀请码库存状态", description = "检查是否还有可用邀请码")
+    @RateLimiter(
+            type = RateLimiterType.LINUXDO_INVITE_STATUS,
+            permitsPerSecond = 100.0 / 60,
+            bucketCapacity = 100,
+            message = "查询邀请码库存请求过于频繁，请稍后再试",
+            global = true
+    )
+    @GetMapping("/linuxdo/invite/status")
+    public ApiResponse<Boolean> linuxDoInviteStatus() {
+        return ApiResponse.success(linuxDoInviteService.hasStock());
+    }
+
+    /**
+     * LinuxDo 邀请码申请 -- (仅支持edu.cn邮箱)
+     * 日期单数开启双数关闭
+     *
+     * @param  email 邮箱
+     * @return 申请结果
+     */
+    @Operation(summary = "LinuxDo 邀请码申请", description = "申请LinuxDo邀请码")
+    @RateLimiter(
+            type = RateLimiterType.LINUXDO_INVITE_APPLY,
+            permitsPerSecond = 10.0 / 60,
+            bucketCapacity = 10,
+            message = "申请邀请码请求过于频繁，请稍后再试",
+            global = true
+    )
+    @PostMapping("/linuxdo/invite/apply")
+    public ApiResponse<Boolean> linuxDoInvite(@RequestParam String email) {
+        try {
+            linuxDoInviteService.apply(email);
+            return ApiResponse.success(true);
+        } catch (Exception e) {
+            log.error("LinuxDo邀请码申请失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, e.getMessage());
+        }
+    }
+
+    /**
+     * LinuxDo 邀请码验证领取
+     *
+     * @param token 邮件中的token
+     * @return 邀请码
+     */
+    @Operation(summary = "LinuxDo邀请码验证领取", description = "验证token并领取邀请码")
+    @GetMapping("/linuxdo/invite/verify")
+    public ApiResponse<String> linuxDoInviteVerify(@RequestParam String token) {
+        try {
+            String code = linuxDoInviteService.verify(token);
+            return ApiResponse.success(code);
+        } catch (Exception e) {
+            log.error("LinuxDo邀请码验证失败: {}", e.getMessage(), e);
+            return ApiResponse.error(500, e.getMessage());
         }
     }
 }
